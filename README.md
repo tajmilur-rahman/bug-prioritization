@@ -4,7 +4,7 @@
 1. From root of project repository, run scripts/getdataset.py. 
 This will retrieve the dataset of Bugbug and store as data/bugs.json. However this file is large (~ 8GB) and contains many unused data, we filter out the data which are useful for bug prioritization in the next step.
 2. Get the right objects "bugs" from bugs.json file and remove unused but large fields like "history", "attachements", so that the data file size is reduced to ~ 6GB. The output file is bugs.ndjson which is more easy to process than .json file so the preprocessing steps can be done quickly on local machine.  
-From root of project repository, run below command. Output is bugs.ndjson file (stored at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
+From root of project repository, run below command. Output is bugs.ndjson file at data folder. There's one copy of bugs.ndjson at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
 
 ```shell
 $ jq -c '

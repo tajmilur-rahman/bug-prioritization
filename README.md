@@ -4,10 +4,10 @@
 1. From root of project repository, run scripts/getdataset.py. 
 This will retrieve the dataset of Bugbug and store as data/bugs.json. However this file is large (~ 8GB) and contains many unused data, we filter out the data which are useful for bug prioritization in the next step.
 2. Get the right objects "bugs" from bugs.json file and remove unused but large fields like "history", "attachements", so that the data file size is reduced to ~ 6GB. The output file is bugs.ndjson which is more easy to process than .json file so the preprocessing steps can be done quickly on local machine.  
-From root of project repository, run below command. Output is bugs.ndjson file at data folder. There's one copy of bugs.ndjson at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
+From root of project repository, run below shell command in terminal. Output is bugs.ndjson file at data folder. There's one copy of bugs.ndjson at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
 
 ```shell
-$ jq -c '
+jq -c '
   ( if type == "array"                          then .[]
     elif type == "object" and has("bugs")       then .bugs[]
     elif type == "object" and has("result") and (.result|has("bugs")) then .result.bugs[]
@@ -19,6 +19,32 @@ $ jq -c '
 
 ## Data Preprocessing
 1. "process_bugs.py" cleans the data and stores the cleaned data in multiple .csv files inside "clean" folder.
+
+How to run
+- Put your big dump at data/raw/json/bugs.json (array) or bugs.ndjson (one JSON object per line).
+- Run to produce both raw & clean CSVs in 10k chunks:
+```shell
+python scripts/process_bugs.py \
+  --input data/bugs.json \
+  --format json \
+  --outdir data \
+  --chunk 10000 \
+  --write-raw yes \
+  --write-clean yes
+```
+This will create:
+```shell
+data/
+├─ raw/
+│  ├─ bugs_raw_000.csv
+│  ├─ bugs_raw_001.csv
+│  └─ ... (every 10,000 rows)
+├─ clean/
+│  ├─ bugs_clean_000.csv
+│  ├─ bugs_clean_001.csv
+│  └─ ...
+└─ manifest.json
+```
 
 Data fields after cleaning to be used for models training
 

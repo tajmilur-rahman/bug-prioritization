@@ -21,12 +21,12 @@ jq -c '
 1. "process_bugs.py" cleans the data and stores the cleaned data in multiple .csv files inside "clean" folder.
 
 How to run
-- Put your big dump at data/raw/json/bugs.json (array) or bugs.ndjson (one JSON object per line).
+- Put your big dump at data/bugs.json (array) or data/bugs.ndjson (one JSON object per line).
 - Run to produce both raw & clean CSVs in 10k chunks:
 ```shell
 python scripts/process_bugs.py \
-  --input data/bugs.json \
-  --format json \
+  --input data/bugs.ndjson \
+  --format ndjson \
   --outdir data \
   --chunk 10000 \
   --write-raw yes \

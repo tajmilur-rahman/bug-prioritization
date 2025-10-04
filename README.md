@@ -1,5 +1,28 @@
 # Bug Prioritization
 
+## Environment Setup
+***Recheck and rerun these if any dependencies or environment variables added or changed (changed in configs/base-requirements.txt file or .env file changed).***
+From the repository root directory:
+
+1. Install dependencies
+```shell
+# Python deps common to all services
+pip install --no-cache-dir -r configs/base-requirements.txt
+
+# CPU torch (small, no CUDA)
+pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+2. Run script/load_env.py then all keys from .env become available for the later running scripts via os.environ
+```shell
+python scripts/load_env.py
+```
+Inside later running scripts:
+```python
+import os
+ART = os.getenv("ARTIFACTS_DIR", "/app/artifacts")
+```
+
 ## Data Retrieval 
 1. From root of project repository, run scripts/getdataset.py. 
 This will retrieve the dataset of Bugbug and store as data/bugs.json. However this file is large (~ 8GB) and contains many unused data, we filter out the data which are useful for bug prioritization in the next step.
@@ -74,4 +97,72 @@ Data fields after cleaning to be used for models training
 
 2. "merge_resolved.py" takes only the **"RESOLVED"** bugs (filterd by **status** field) from all the cleaned .csv files and merge to one file for using in later steps. There were 563547 resolved bugs merged in to data/bugs_resolved.csv file. The same named file on reporsitory is a little sample of that.
 
+3. Split data for training and evaluation
+Below command splits data from data/bugs_resolved.csv and writes data/processed/train.csv, val.csv, test.csv (sorted by creation_time).
+```shell
+python scripts/make_time_splits.py
+```
+*With current dataset, splits train=450839 val=56354 test=56354 -> data/processed*
 
+
+## Compute Embeddings
+Turn each bug’s text into a fixed-dimensional vector once, cache it, and reuse it for:
+- **Topics** (BERTopic discovery/assign & centroids), and
+- **Priority classifier** (XGBoost/MLP), fused with metadata + numeric features.
+We do this with a small sentence-transformer (default: all-MiniLM-L6-v2) and a stable encoder_id so we only re-embed when the encoder actually changes.
+
+### Inputs
+**Cleaned bug rows (CSV):** 
+  - data/processed/train.csv, val.csv, test.csv
+  - Required text fields: summary, description 
+  - Optional: id, metadata (e.g., product, component, …), numeric features (summary_len, desc_len, …).
+**Encoder config (defaults from .env / configs/base.yaml):**
+  - EMB_MODEL (e.g., sentence-transformers/all-MiniLM-L6-v2)
+  - EMB_MAX_LEN (128–192 words)
+  - normalization: normalize=True
+**Hardware mode:**
+  - DEVICE=gpu|cpu|auto (GPU preferred, CPU fallback)
+
+### Outputs (saved to data/processed/{train|val}_emb_shards/*.parquet):
+- Parquet shard files (separate output to many files as many more fields added and bugs file is larger) with the fields needed for training & topic jobs.
+- Cache: SQLite key-value on sha1(text) → vector, helps avoid re-embedding
+
+Output data row schema (in parquet shard files):
+- id (str|int) – keep it for joins/eval
+- summary (str), description (str, optional)
+- embedding (list[float]) – 384 dims (MiniLM) by default
+- Categorical passthrough (can be changed in command argument): product, component, platform, op_sys, priority (if labeled)
+- Numeric flags (can be changed in command argument): summary_len, desc_len, url_count, code_fence_count, has_stacktrace (0/1),
+dup_count, depends_on_count, blocks_count
+
+### How to use
+```shell
+python scripts/embed_docs.py \
+      --input_csv "data/processed/train.csv" \
+      --mode local \
+      --device cpu \
+      --text_cols summary description \
+      --pass_cols product component platform op_sys priority \
+      --numeric_from votes comment_count \
+      --shard_name train_emb_shards \
+      --shard_size 50000 \
+      --cache_db artifacts/emb_cache/embeddings.sqlite
+
+python scripts/embed_docs.py \
+      --input_csv "data/processed/val.csv" \
+      --mode local \
+      --device cpu \
+      --text_cols summary description \
+      --pass_cols product component platform op_sys priority \
+      --numeric_from votes comment_count \
+      --shard_name val_emb_shards \
+      --shard_size 20000 \
+      --cache_db artifacts/emb_cache/embeddings.sqlite
+```
+### Why Parquet shards + SQLite cache?
+•	Parquet shards (20–50k rows each) are efficient to scan and column-select (fast for training & topic jobs).
+•	SQLite cache is light and can store millions of records of bugs' embbedings while suitable for 0/1 lookups on sha1(text).
+ 
+### Maintenance notes
+•	Encoder changes (e.g., switch from MiniLM → DistilBERT): bump encoder_id in topic/manifest; use a new cache DB path (e.g., artifacts/emb_cache/embeddings_v2.sqlite) to avoid mixing vectors of different dimension/normalization.
+•	Batch sizing: start with 256 (local CPU) and adjust to saturate GPU

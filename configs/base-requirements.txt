@@ -1,0 +1,24 @@
+# Base Python deps shared by most services
+# web/api
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# ml + data
+numpy>=2.0
+pandas>=2.2
+scikit-learn>=1.5
+xgboost>=2.0
+
+# nlp
+bertopic>=0.16
+umap-learn>=0.5
+hdbscan>=0.8
+sentence-transformers>=3.0
+
+# utils/ui
+requests>=2.32
+streamlit
+matplotlib
+orjson
+ijson

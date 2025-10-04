@@ -13,11 +13,11 @@ pip install --no-cache-dir -r configs/base-requirements.txt
 pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-2. Run script/load_env.py then all keys from .env become available for the later running scripts via os.environ
+2. Run **script/load_env.py** then all keys from **.env** file become available for the later running scripts via os.environ
 ```shell
 python scripts/load_env.py
 ```
-Inside later running scripts:
+Inside later running scripts (example):
 ```python
 import os
 ART = os.getenv("ARTIFACTS_DIR", "/app/artifacts")

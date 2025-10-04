@@ -160,9 +160,9 @@ python scripts/embed_docs.py \
       --cache_db artifacts/emb_cache/embeddings.sqlite
 ```
 ### Why Parquet shards + SQLite cache?
-•	Parquet shards (20–50k rows each) are efficient to scan and column-select (fast for training & topic jobs).
-•	SQLite cache is light and can store millions of records of bugs' embbedings while suitable for 0/1 lookups on sha1(text).
+- Parquet shards (20–50k rows each) are efficient to scan and column-select (fast for training & topic jobs).
+- SQLite cache is light and can store millions of records of bugs' embbedings while suitable for 0/1 lookups on sha1(text).
  
 ### Maintenance notes
-•	Encoder changes (e.g., switch from MiniLM → DistilBERT): bump encoder_id in topic/manifest; use a new cache DB path (e.g., artifacts/emb_cache/embeddings_v2.sqlite) to avoid mixing vectors of different dimension/normalization.
-•	Batch sizing: start with 256 (local CPU) and adjust to saturate GPU
+- Encoder changes (e.g., switch from MiniLM → DistilBERT): bump encoder_id in topic/manifest; use a new cache DB path (e.g., artifacts/emb_cache/embeddings_v2.sqlite) to avoid mixing vectors of different dimension/normalization.
+- Batch sizing: start with 256 (local CPU) and adjust to saturate GPU

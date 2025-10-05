@@ -1,0 +1,39 @@
+encoder_id: "model=all-MiniLM-L6-v2|max_len=160|normalize=True"
+
+fit:
+  # Pull docs from these columns for c-TF-IDF keywords (optional)
+  text_cols: ["summary", "description"]
+
+  # Sampling to keep UMAP/HDBSCAN sane on single machine
+  sample_frac: 0.15         # sample 15% of rows per file
+  sample_max: 100000        # cap total rows used
+  limit: null               # alternative hard cap across all files (overrides sample_max if set)
+  use_umap: true            # set false to skip UMAP entirely
+
+umap:
+  n_neighbors: 15
+  n_components: 5
+  min_dist: 0.0
+  metric: "cosine"
+  random_state: 42
+  low_memory: true
+  verbose: true
+
+hdbscan:
+  min_topic_size: 20        # tweak to control fragmentation
+  prediction_data: true        # <-- add this for "safe" assign mode
+
+ctfidf:
+  stop_words: "english"
+  max_df: 0.9
+  min_df: 5
+  ngram_range: [1, 2]
+  nr_topics: null           # or "auto" (BERTopic reduces topics)
+  top_n_words: 10
+
+centroid:
+  threshold_default: 0.35   # Track B decision threshold (cosine to centroid)
+
+assign:
+  write_suffix: ".withtopics"   # input part-0000.parquet -> part-0000.withtopics.parquet
+  predict_backend: "safe"      # "safe" (recommended) or "bertopic"

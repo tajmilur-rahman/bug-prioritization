@@ -166,3 +166,76 @@ python scripts/embed_docs.py \
 ### Maintenance notes
 - Encoder changes (e.g., switch from MiniLM → DistilBERT): bump encoder_id in topic/manifest; use a new cache DB path (e.g., artifacts/emb_cache/embeddings_v2.sqlite) to avoid mixing vectors of different dimension/normalization.
 - Batch sizing: start with 256 (local CPU) and adjust to saturate GPU
+
+
+## Topics 
+BERTopic jobs after embedding: **scripts/topic_jobs.py** can do the following
+- Fit UMAP/HDBSCAN on a subset (config the max sample size in **configs/topics.yaml**),
+- Assign topics to all rows og bug reports,
+- Save artifacts/topics/bertopic_model, topic_centroids.npy, manifest.json, topic_info.csv, and topic_top_words.
+- Write topic_id (A/B) back to CSVs parquet shards.
+
+### Input:
+```shell
+configs/
+├─ topics.yaml
+data/processed
+├─ train_emb_shards/
+│  ├─ part-00000000-00050000.parquet 
+│  ├─ part-00000000-00100000.parquet
+│  └─ ... (every 50,000 () rows)
+├─ val_emb_shards/
+│  ├─ part-00000000-00020000.parquet
+│  ├─ part-00000000-00040000.parquet
+│  └─ ... (every 20,000 () rows)
+```
+
+### Output:
+```shell
+artifacts/topics/
+├─ bertopic_model.pkl
+├─ topic_centroids.npy
+├─ manifest.json
+├─ topic_info.csv      # Topic,Count,Name,Representation,Representative_Docs
+├─ topic_top_words.csv # keywords of topics
+data/processed
+├─ train_emb_shards/
+│  ├─ part-00000000-00050000.withtopics.parquet # topic_id_A (for classification with bertopic model available), 
+│  ├                                            # topic_id_B (for classification with topic centroids only)
+│  ├─ part-00000000-00100000.withtopics.parquet
+│  └─ ... (every 50,000 () rows)
+├─ val_emb_shards/
+│  ├─ part-00000000-00020000.withtopics.parquet
+│  ├─ part-00000000-00040000.withtopics.parquet
+│  └─ ... (every 20,000 () rows)
+```
+
+### How to run
+Run below shell script (save the script into an .sh file an run in a terminal/CLI)
+```shell
+TOPICS_CFG=configs/topics.yaml
+TRAIN_EMB_GLOB=data/processed/train_emb_shards/*.parquet
+VAL_EMB_GLOB=data/processed/val_emb_shards/*.parquet
+TOPICS_DIR=artifacts/topics
+
+# Fit Topic model with training data
+python scripts/topic_jobs.py fit \
+    --config "$TOPICS_CFG" \
+    --train_glob "$TRAIN_EMB_GLOB" \
+    --out_dir "$TOPICS_DIR"
+
+# Assign Topics for training data
+python scripts/topic_jobs.py assign \
+    --config "$TOPICS_CFG" \
+    --topics_dir "$TOPICS_DIR" \
+    --shards_glob "$TRAIN_EMB_GLOB" \
+    --mode both
+
+# Assign Topics for evaluation data
+python scripts/topic_jobs.py assign \
+    --config "$TOPICS_CFG" \
+    --topics_dir "$TOPICS_DIR" \
+    --shards_glob "$VAL_EMB_GLOB" \
+    --mode both
+```
+

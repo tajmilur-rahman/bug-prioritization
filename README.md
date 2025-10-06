@@ -124,10 +124,12 @@ We do this with a small sentence-transformer (default: all-MiniLM-L6-v2) and a s
   - data/processed/train.csv, val.csv, test.csv
   - Required text fields: summary, description 
   - Optional: id, metadata (e.g., product, component, …), numeric features (summary_len, desc_len, …).
+
 **Encoder config (defaults from .env / configs/base.yaml):**
   - EMB_MODEL (e.g., sentence-transformers/all-MiniLM-L6-v2)
   - EMB_MAX_LEN (128–192 words)
   - normalization: normalize=True
+
 **Hardware mode:**
   - DEVICE=gpu|cpu|auto (GPU preferred, CPU fallback)
 

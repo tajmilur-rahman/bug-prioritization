@@ -24,10 +24,10 @@ ART = os.getenv("ARTIFACTS_DIR", "/app/artifacts")
 ```
 
 ## Data Retrieval 
-1. From root of project repository, run scripts/getdataset.py. 
+1. From root of project repository, run scripts/getdataset.py. (May need to install deferent dependecies for **bugbug**. The environment setup step above focuses on dependencies for all other steps.)
 This will retrieve the dataset of Bugbug and store as data/bugs.json. However this file is large (~ 8GB) and contains many unused data, we filter out the data which are useful for bug prioritization in the next step.
-2. Get the right objects "bugs" from bugs.json file and remove unused but large fields like "history", "attachements", so that the data file size is reduced to ~ 6GB. The output file is bugs.ndjson which is more easy to process than .json file so the preprocessing steps can be done quickly on local machine.  
-From root of project repository, run below shell command in terminal. Output is bugs.ndjson file at data folder. There's one copy of bugs.ndjson at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
+2. Get the right objects "bugs" from **bugs.json** file and remove unused but large fields like **"history", "attachements"**, so that the data file size is reduced to ~ 6GB. The output file is **bugs.ndjson** which is more easy to process than .json file so the preprocessing steps can be done quickly on local machine.  
+From root of project repository, run below shell command in terminal. Output is **bugs.ndjson** file at data folder. (There's one copy of **bugs.ndjson** at https://drive.google.com/file/d/1983RBoiLobw2ITjvED6p8tmE_jh7fNB0/view?usp=share_link)
 
 ```shell
 jq -c '
@@ -95,7 +95,15 @@ Data fields after cleaning to be used for models training
 - days_open_est (from creation_time → last_change_time if both parse)
 
 
-2. "merge_resolved.py" takes only the **"RESOLVED"** bugs (filterd by **status** field) from all the cleaned .csv files and merge to one file for using in later steps. There were 563547 resolved bugs merged in to data/bugs_resolved.csv file. The same named file on reporsitory is a little sample of that.
+2. "merge_resolved.py" takes only the **"RESOLVED"** bugs (filterd by **status** field) from all the cleaned .csv files and merge to one file for using in later steps. There were 201539 resolved bugs merged in to data/bugs_resolved.csv file. The same named file on reporsitory is a little sample of that.
+
+Detail result after merging resolved:
+```text
+Classes:  ['P1', 'P2', 'P3', 'P4', 'P5']
+Dropped 187203 / 750750 rows (24.9%) for UNRESOLVED.
+Dropped 362008 / 750750 rows (48.2%) with invalid/missing data or labels.
+Merged 201539 bugs with valid labels -> data/bugs_resolved.csv
+```
 
 3. Split data for training and evaluation
 Below command splits data from data/bugs_resolved.csv and writes data/processed/train.csv, val.csv, test.csv (sorted by creation_time).
@@ -217,6 +225,8 @@ TOPICS_CFG=configs/topics.yaml
 TRAIN_EMB_GLOB=data/processed/train_emb_shards/*.parquet
 VAL_EMB_GLOB=data/processed/val_emb_shards/*.parquet
 TOPICS_DIR=artifacts/topics
+
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MKL_THREADING_LAYER=GNU NUMBA_THREADING_LAYER=workqueue
 
 # Fit Topic model with training data
 python scripts/topic_jobs.py fit \

@@ -11,11 +11,6 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip wheel setuptools
 pip install -r configs/requirements.txt -c configs/constraints.default.txt
-
-# pip install --no-cache-dir -r configs/base-requirements.txt
-
-# CPU torch (small, no CUDA)
-# pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 2. Run **script/load_env.py** then all keys from **.env** file become available for the later running scripts via os.environ
@@ -254,7 +249,7 @@ python scripts/topic_jobs.py assign \
     --mode both
 ```
 
-## Training Bug Classification
+## Training Bug Priority Classification
 At this stage, various classification algorithms and featuring techniques can be applied with the data ready from Topics step. (**scripts/check_data.py** can be used to check basic information of the data.)
 
 ### Classification with XGBoost
@@ -263,6 +258,30 @@ At this stage, various classification algorithms and featuring techniques can be
 **Input**
 - Data (CSV or parquet shard files) with topic_id added. (Output of the Topics.)
 - Featuring configuration **configs/features.yaml**
+
+Result of data checking with current dataset before training classifier:
+```text
+Dropped 111233 rows with NA label
+Dropped 153 rows with NA label
+Training size: 50000
+Evaluation size: 20000
+Training labels distribution:
+P3    18995
+P2    11243
+P1    10562
+P5     6780
+P4     2420
+Name: count, dtype: int64
+Evaluation labels distribution:
+P5    6801
+P1    3692
+P3    3419
+P2    3127
+P4    2961
+Classes:
+['P1', 'P2', 'P3', 'P4', 'P5']
+```
+***Need to add class weighting and appropriate techniques to resolve imbalancing among classes.***
 
 **Output**
 - Classification reports is stored at **artifacts/clf_XGB_YYYYMMDD_HHMMSS**

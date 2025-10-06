@@ -1,16 +1,21 @@
 # Bug Prioritization
 
 ## Environment Setup
-***Recheck and rerun these if any dependencies or environment variables added or changed (changed in configs/base-requirements.txt file or .env file changed).***
+***Recheck and rerun these if any dependencies or environment variables added or changed (changed in configs/requirements.txt file, configs/constraints.txt file or .env file).***
 From the repository root directory:
 
 1. Install dependencies
 ```shell
 # Python deps common to all services
-pip install --no-cache-dir -r configs/base-requirements.txt
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip wheel setuptools
+pip install -r configs/requirements.txt -c configs/constraints.default.txt
+
+# pip install --no-cache-dir -r configs/base-requirements.txt
 
 # CPU torch (small, no CUDA)
-pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 2. Run **script/load_env.py** then all keys from **.env** file become available for the later running scripts via os.environ
@@ -110,7 +115,7 @@ Below command splits data from data/bugs_resolved.csv and writes data/processed/
 ```shell
 python scripts/make_time_splits.py
 ```
-*With current dataset, splits train=450839 val=56354 test=56354 -> data/processed*
+*With current dataset, splits train=161233 val=20153 test=20153 -> data/processed*
 
 
 ## Compute Embeddings
@@ -249,3 +254,26 @@ python scripts/topic_jobs.py assign \
     --mode both
 ```
 
+## Training Bug Classification
+At this stage, various classification algorithms and featuring techniques can be applied with the data ready from Topics step. (**scripts/check_data.py** can be used to check basic information of the data.)
+
+### Classification with XGBoost
+... (To be detailed. More changes to be done to improve reuslts of the first modeling.)
+
+**Input**
+- Data (CSV or parquet shard files) with topic_id added. (Output of the Topics.)
+- Featuring configuration **configs/features.yaml**
+
+**Output**
+- Classification reports is stored at **artifacts/clf_XGB_YYYYMMDD_HHMMSS**
+
+**How to use**
+```shell
+python libs/models/train_xgb.py \
+  --train_parquet_glob "data/processed/train_emb_shards/*.withtopics.parquet" \
+  --val_parquet_glob   "data/processed/val_emb_shards/*.withtopics.parquet" \
+  --features_cfg configs/features.yaml \
+  --topics_centroids artifacts/topics/topic_centroids.npy \
+  --class_weight \
+  --out_dir artifacts
+```

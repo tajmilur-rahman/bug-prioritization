@@ -1,0 +1,47 @@
+text:
+  embedding_col: embedding
+  project_dim: 128
+  normalize_block: true
+
+topics:
+  use: true
+  source: transform            # centroid (lightweight) | transform (need BERTopic model available)
+  as_embedding: true
+  dim: 8
+  outlier_id: -1
+
+categorical:
+  fields: [product, component, platform, op_sys]
+  embedding:
+    enabled: true
+    dim: 16
+    dropout: 0.2
+  ohe_small: true
+  hashing_trick:
+    enabled: true
+    fields: [reporter]
+    buckets: 512
+    topk_pass: 100
+
+numeric:
+  fields: [summary_len, desc_len, url_count, code_fence_count, has_stacktrace] # , dup_count, depends_on_count, blocks_count (update embedding step for numberics fields)
+  scale:
+    enabled: true
+    method: standard
+
+fusion:
+  mode: A
+  dropout: 0.3
+  block_dropout:
+    text: 0.1
+    meta: 0.2
+    topics: 0.1
+    numeric: 0.0
+  balance_dims: true
+
+regularization:
+  feature_ablation_switches:
+    use_text: true
+    use_metadata: true
+    use_numeric: true
+    use_topic: true

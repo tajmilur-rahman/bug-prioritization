@@ -1,0 +1,26 @@
+# Core
+numpy
+pandas
+pyarrow
+scipy
+scikit-learn
+xgboost
+
+# NLP / embeddings (local mode optional)
+torch          # CPU build is fine; pip will choose wheel
+sentence-transformers
+
+# Topics
+bertopic
+umap-learn
+hdbscan
+
+# Utilities
+tqdm
+requests
+pyyaml
+bottleneck     # optional speed-up for pandas
+shap           # optional for explainability
+
+# Parquet alt engine (optional on Linux/Windows)
+fastparquet; sys_platform == "linux" or sys_platform == "win32"

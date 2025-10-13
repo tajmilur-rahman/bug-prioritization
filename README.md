@@ -1,5 +1,13 @@
 # Bug Prioritization
 
+## 📘 Detailed Documentation
+See the extended overview here:  
+👉 [Bug Prioritization Project Overview](docs/Bug_Prioritization_Project_Overview.md)
+
+See the [Background and Motivation](docs/Bug_Prioritization_Project_Overview.md#1--background-and-motivation) section for context.
+
+
+
 ## Environment Setup
 ***Recheck and rerun these if any dependencies or environment variables added or changed (changed in configs/requirements.txt file, configs/constraints.txt file or .env file).***
 From the repository root directory:

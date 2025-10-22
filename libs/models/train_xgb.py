@@ -1,90 +1,120 @@
-import argparse, os, glob, json
-import numpy as np, pandas as pd, xgboost as xgb, yaml
-from sklearn.metrics import classification_report, confusion_matrix
-import matplotlib.pyplot as plt
 
+import os, json, argparse, numpy as np
+import pandas as pd
 import sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]  # repo root (adjust if layout changes)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from libs.data.build_features_xgb import build_xgb_features
-
-def normalize_df(df):
-    n0 = len(df)
-    df = df.dropna(subset=['priority'])
-    n1 = len(df)
-    print(f"Dropped {n0-n1} rows with NA label")
-    df.reset_index(drop=True)
-    return df
-
-def load_df(csv_path=None, parquet_glob=None, limit=None, cols=None):
-    if csv_path:
-        df = pd.read_csv(csv_path, usecols=cols) if cols else pd.read_csv(csv_path)
-        df = normalize_df(df)
-        return df if not limit else df.head(limit)
-    if parquet_glob:
-        files = sorted(glob.glob(parquet_glob)); parts = []
-        for fp in files:
-            dfp = pd.read_parquet(fp, columns=cols) if cols else pd.read_parquet(fp)
-            parts.append(dfp)
-        df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-        df = normalize_df(df)
-        return df if not limit else df.head(limit)
-    raise SystemExit("Provide either --train_csv or --train_parquet_glob")
-
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=".env", override=False)
+from libs.utils.imbalance import class_weights_from_counts, choose_imbalance_strategy, apply_smote_tomek_if_needed
+from libs.models.io_config import load_yaml, getenv_bool, load_prep_artifacts, read_arrow_matrix, build_test_features_from_csv
+from libs.utils.reporting import make_run_dir, evaluate_and_save
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--train_csv"); ap.add_argument("--val_csv")
-    ap.add_argument("--train_parquet_glob"); ap.add_argument("--val_parquet_glob")
-    ap.add_argument("--features_cfg", default="configs/features.yaml")
-    ap.add_argument("--topics_centroids", default="artifacts/topics/topic_centroids.npy")
-    ap.add_argument("--topics_threshold", type=float, default=0.35)
-    ap.add_argument("--out_dir", default="artifacts")
-    ap.add_argument("--model_name", default="clf_XGB")
-    ap.add_argument("--limit", type=int)
-    ap.add_argument("--class_weight", action="store_true")
-    args = ap.parse_args()
-    cfg = yaml.safe_load(open(args.features_cfg))
-    centroids = None
-    if cfg.get("topics", {}).get("use", True) and cfg["topics"].get("source","centroid")!="transform":
-        if not Path(args.topics_centroids).exists(): raise SystemExit(f"Centroids not found at {args.topics_centroids}")
-        centroids = np.load(args.topics_centroids)
-    train_df = load_df(args.train_csv, args.train_parquet_glob, limit=args.limit)
-    val_df   = load_df(args.val_csv,   args.val_parquet_glob,   limit=args.limit)
-    Xtr, ytr, _ = build_xgb_features(train_df, cfg, centroids=centroids, threshold=args.topics_threshold)
-    Xva, yva, _ = build_xgb_features(val_df,   cfg, centroids=centroids, threshold=args.topics_threshold)
-    
-    classes = sorted(pd.unique(pd.concat([pd.Series(ytr), pd.Series(yva)], ignore_index=True)))
-    print(f"Training size: {len(ytr)}")
-    print(f"Evaluation size: {len(yva)}")
-    print("Training labels distribution:\n", pd.Series(ytr).value_counts())
-    print("Evaluation labels distribution:\n", pd.Series(yva).value_counts())
-    print(classes)
-    
-    cls_to_idx = {c:i for i,c in enumerate(classes)}
-    ytr_idx = np.array([cls_to_idx[c] for c in ytr], dtype=np.int32)
-    yva_idx = np.array([cls_to_idx[c] for c in yva], dtype=np.int32)
-    if args.class_weight:
-        _, counts = np.unique(ytr_idx, return_counts=True); total = counts.sum()
-        weights = total / (len(counts) * counts); class_weights = {i: float(w) for i,w in enumerate(weights)}
-    else:
-        class_weights = None
-    params = dict(objective="multi:softprob", num_class=len(classes), max_depth=8, eta=0.1,
-                  subsample=0.9, colsample_bytree=0.9, tree_method="hist", eval_metric="mlogloss")
-    dtrain = xgb.DMatrix(Xtr, label=ytr_idx, weight=[class_weights[i] for i in ytr_idx] if class_weights else None)
-    dval   = xgb.DMatrix(Xva, label=yva_idx)
-    bst = xgb.train(params, dtrain, num_boost_round=500, evals=[(dtrain,"train"),(dval,"val")], early_stopping_rounds=50, verbose_eval=50)
-    preds = bst.predict(dval).argmax(axis=1)
-    outdir = Path(args.out_dir) / f"{args.model_name}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
-    outdir.mkdir(parents=True, exist_ok=True); bst.save_model(str(outdir/"xgb.json"))
-    (outdir/"label_map.json").write_text(json.dumps({"classes": [str(c) for c in classes], "cls_to_idx": {str(k):int(v) for k,v in cls_to_idx.items()}}, indent=2))
-    rep = classification_report(yva_idx, preds, target_names=[str(c) for c in classes], output_dict=True, zero_division=0)
-    (outdir/"classification_report.json").write_text(json.dumps(rep, indent=2))
-    from sklearn.metrics import confusion_matrix
-    cm = confusion_matrix(yva_idx, preds).tolist()
-    (outdir/"confusion_matrix.json").write_text(json.dumps({"labels": [str(c) for c in classes], "matrix": cm}, indent=2))
-    print(f"[train_xgb] saved to {outdir}")
+    ap.add_argument("--features-config", default="configs/features.yaml")
+    ap.add_argument("--prep-root", default=os.getenv("PREP_CACHE_ROOT","artifacts/prep"))
+    ap.add_argument("--prep-id", required=True)
+    ap.add_argument("--fusion", default=os.getenv("FUSION","A1"))
+    ap.add_argument("--threads", type=int, default=int(os.getenv("XGB_THREADS","16")))
+    ap.add_argument("--oversample", choices=["none","smote_tomek"], default="none")
+    ap.add_argument("--test-csv", default=None, help="Optional: test CSV with no topics; will be transformed using prep artifacts.")
 
-if __name__ == "__main__": main()
+    ap.add_argument("--n-estimators", type=int,   default=int(os.getenv("XGB_N_EST","1200")))
+    ap.add_argument("--max-depth",    type=int,   default=int(os.getenv("XGB_MAX_DEPTH","8")))
+    ap.add_argument("--learning-rate",type=float, default=float(os.getenv("XGB_LR","0.05")))
+    ap.add_argument("--subsample",    type=float, default=float(os.getenv("XGB_SUBSAMPLE","0.8")))
+    ap.add_argument("--colsample-bytree", type=float, default=float(os.getenv("XGB_COLSAMPLE","0.8")))
+    ap.add_argument("--max-bin",      type=int,   default=int(os.getenv("XGB_MAX_BIN","256")))
+    ap.add_argument("--tree-method",  default=os.getenv("XGB_TREE_METHOD","hist"))
+    ap.add_argument("--grow-policy",  default=os.getenv("XGB_GROW_POLICY","lossguide"))
+    ap.add_argument("--gpu",          type=lambda s: str(s).lower() in ("1","true","yes"),
+                default=os.getenv("XGB_GPU","false").lower()=="true")
+
+    args = ap.parse_args()
+
+    cfg = load_yaml(args.features_config)
+    art = load_prep_artifacts(args.prep_root, args.prep_id)
+
+    # Load matrices
+    X_train = read_arrow_matrix(art["X_train"])
+    X_val = read_arrow_matrix(art["X_val"])
+    ytr = np.load(art["y_train"])
+    yva = np.load(art["y_val"])
+
+    # Formalize ytr, yva to y_train, y_val
+    classes = sorted(pd.unique(pd.concat([pd.Series(ytr), pd.Series(yva)], ignore_index=True)))
+    cls_to_idx = {c:i for i,c in enumerate(classes)}
+    y_train = np.array([cls_to_idx[c] for c in ytr], dtype=np.int32)
+    y_val = np.array([cls_to_idx[c] for c in yva], dtype=np.int32)
+
+    # Imbalance
+    strategy, _ = choose_imbalance_strategy(y_train, algo="xgboost")
+    if args.oversample == "smote_tomek":
+        strategy = "smote_tomek"
+
+    sample_weight = None
+    if strategy == "class_weight":
+        cw = class_weights_from_counts(y_train)
+        label2w = {lbl: w for lbl, w in cw.items()}
+        sample_weight = np.array([label2w[y] for y in y_train], dtype=float)
+    elif strategy == "smote_tomek":
+        X_train, y_train = apply_smote_tomek_if_needed(X_train, y_train, enabled=True, exclude_cols=None)
+
+    # Train
+    import xgboost as xgb
+    params = dict(
+        n_estimators=args.n_estimators,
+        max_depth=args.max_depth,
+        learning_rate=args.learning_rate,
+        subsample=args.subsample,
+        colsample_bytree=args.colsample_bytree,
+        tree_method=("gpu_hist" if args.gpu else args.tree_method),
+        max_bin=args.max_bin,
+        grow_policy=args.grow_policy,
+        n_jobs=args.threads,
+        random_state=int(os.getenv("RANDOM_SEED","42")),
+        eval_metric="mlogloss",
+    )
+    model = xgb.XGBClassifier(**params)
+    model.fit(X_train, y_train, sample_weight=sample_weight, eval_set=[(X_val, y_val)], verbose=False)
+
+    # Save run artifacts under artifacts/clf_XGB_YYYYMMDD_HHMMSS
+    run_dir = make_run_dir("XGB", artifacts_root=os.getenv("ARTIFACTS_DIR","artifacts"))
+    y_val_pred = model.predict(X_val)
+    try:
+        y_val_prob = model.predict_proba(X_val)
+    except Exception:
+        y_val_prob = None
+
+    _ = evaluate_and_save(run_dir, y_val, y_val_pred, 
+                          np.array([int(v) for k,v in cls_to_idx.items()], dtype=np.int32), 
+                          np.array([str(k) for k,v in cls_to_idx.items()], dtype=str),
+                          y_val_prob, model_tag="XGB")
+    (run_dir / "xgb.json").write_text(json.dumps(model.get_xgb_params(), indent=2), encoding="utf-8")
+    print(f"[XGB] Wrote outputs to {run_dir}")
+
+    # Optional: predict on cached X_test
+    if art["X_test"] and art["y_test"]:
+        X_test = read_arrow_matrix(art["X_test"]); y_test = np.load(art["y_test"])
+        y_pred = model.predict(X_test)
+        from sklearn.metrics import f1_score, classification_report
+        print("[XGB] Cached Test macro-F1:", f1_score(y_test, y_pred, average="macro"))
+        print(classification_report(y_test, y_pred))
+
+    # Optional: predict on external test CSV
+    if args.test_csv:
+        schema = art["schema"] or {}
+        text_cols = cfg["data"]["text_cols"]
+        emb_model = cfg["embeddings"]["text"]["model"]
+        max_len = cfg["embeddings"]["text"].get("truncate_tokens", 192)
+        X_new, ids = build_test_features_from_csv(args.test_csv, schema, art["pca"], art["scaler"], art["topics_centroids"], text_cols, emb_model, max_len)
+        y_hat = model.predict(X_new)
+        out = Path("artifacts/predictions"); out.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"id": ids, "pred": y_hat}).to_csv(out / f"xgb_preds_{args.prep_id}.csv", index=False)
+        print(f"[XGB] Wrote predictions to {out / f'xgb_preds_{args.prep_id}.csv'}")
+
+if __name__ == "__main__":
+    main()

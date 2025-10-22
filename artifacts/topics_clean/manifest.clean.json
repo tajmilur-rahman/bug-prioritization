@@ -1,0 +1,10 @@
+{
+  "min_size": 10,
+  "cos_thr": 0.92,
+  "use_jaccard": true,
+  "jaccard_thr": 0.25,
+  "n_old": 400,
+  "n_removed": 1,
+  "n_kept": 399,
+  "n_new": 396
+}

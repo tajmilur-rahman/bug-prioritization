@@ -1,47 +1,207 @@
-text:
-  embedding_col: embedding
-  project_dim: 128
-  normalize_block: true
 
-topics:
-  use: true
-  source: transform            # centroid (lightweight) | transform (need BERTopic model available)
-  as_embedding: true
-  dim: 8
-  outlier_id: -1
+# ===============================
+# Bug Prioritization: features.yaml 
+# Rationale:
+# - Standardize a prep pipeline (topic cleanup + PCA 90–95% + scaling).
+# - Default to centroid-consistent topics for stability at inference.
+# - Keep per-prep cached matrices for reuse across algorithms.
+# - Expose fusion presets and imbalance strategies in one place.
+# ===============================
 
-categorical:
-  fields: [product, component, platform, op_sys]
-  embedding:
-    enabled: true
-    dim: 16
-    dropout: 0.2
-  ohe_small: true
-  hashing_trick:
-    enabled: true
-    fields: [reporter]
-    buckets: 512
-    topk_pass: 100
+seed: 42
 
-numeric:
-  fields: [summary_len, desc_len, url_count, code_fence_count, has_stacktrace] # , dup_count, depends_on_count, blocks_count (update embedding step for numberics fields)
-  scale:
+data:
+  input_path: data/bugs_resolved.csv          # raw dataset (can be csv/parquet)
+  id_col: id
+  text_cols: ["summary", "description"]
+  label_col: priority
+  # pre-split by time (keep these boundaries to preserve drift testing)
+  splits:
+    time_based: true
+    # optional explicit boundaries if you want them recorded:
+    # train_end: "2024-06-30"
+    # val_end:   "2024-12-31"
+  # optional filters
+  filters:
+    min_text_len: 16
+    drop_if_missing_label: true
+    allowed_labels: ["P1", "P2", "P3", "P4", "P5"]
+
+prep:
+  cache:
     enabled: true
-    method: standard
+    root: artifacts/prep
+  # deterministic prep signature is derived from keys below
+  topics:
+    enabled: true
+    source: centroid          # {centroid|transform}; centroid-consistent for stability
+    dim: 8
+    outlier_id: -1
+    merge_duplicates:
+      enabled: true
+      cosine_threshold: 0.92  # merge topics with similar centroids
+    reassign_outliers:
+      enabled: true
+      min_confidence: 0.55    # fold -1 into nearest centroid if confidence >= tau
+  pca:
+    enabled: true
+    target_variance: 0.95     # keep 95% variance by default (90–95 acceptable)
+    max_dim: 256
+    min_dim: 64
+    fit_on: train             # NEVER fit on val/test
+    input: embedding          # name of the precomputed text embedding field
+    output: text_pca
+  scaling:
+    enabled: true
+    standardize_numeric: true
+    ignore:
+      - "one_hot_*"
+      - "hash_*"
+    fit_on: train
+
+embeddings:
+  text:
+    model: sentence-transformers/all-MiniLM-L6-v2
+    #cache_path: artifacts/embeddings/text
+    truncate_tokens: 160
+    # produced field name (consumed by PCA): text_embeddings
+
+features:
+  # ----- Topic features -----
+  topics:
+    use: true
+    kind: "embedding"         # {embedding|distribution|onehot}
+    source: "prep.topics"     # read from prep artifacts
+    dim: 8
+
+  # ----- Metadata (categorical) -----
+  categorical:
+    use: true
+    cols: ["product", "component", "platform", "op_sys"] # currently remove  "version", "type", "status"
+    encoding:
+      strategy: embedding     # {embedding|onehot|hash}
+      emb_dim: 16
+      hash:
+        n_features: 0         # if >0, use hashing instead of embeddings
+    unknown_bucket: true
+
+  # ----- High-cardinality actors (e.g., reporter) -----
+  actors:
+    use: false
+    cols: ["creator", "assigned_to", "qa_contact", "reporter"]
+    encoding:
+      strategy: hash
+      hash:
+        n_features: 512
+
+  # ----- Numeric / counts -----
+  numeric:
+    use: true
+    cols: ["summary_len", "desc_len", "url_count", "code_fence_count",
+           "comment_count", "attachments_count", "duplicates_count",
+           "depends_on_count", "blocks_count", "votes"]
+    clip_quantiles: [0.0, 0.999]   # guard extreme outliers before scaling
+
+  # ----- Custom fields (scalar subset) -----
+  custom:
+    use: true
+    cols: ["cf_rank", "cf_fx_points", "cf_performance_impact"]
 
 fusion:
-  mode: A
-  dropout: 0.3
-  block_dropout:
-    text: 0.1
-    meta: 0.2
-    topics: 0.1
-    numeric: 0.0
-  balance_dims: true
+  # Define common concatenation blocks
+  presets:
+    A1: ["text_pca", "topics_emb", "categorical_emb", "actors_hash", "numeric", "custom"]
+    A2: ["text_pca", "topics_dist", "categorical_emb", "actors_hash", "numeric", "custom"]
+    A3: ["text_pca", "categorical_emb", "actors_hash", "numeric", "custom"]
+    A4: ["text_pca", "topics_emb", "numeric", "custom"]
+    B1: ["text_pca|layernorm", "topics_emb|layernorm", "categorical_emb", "actors_hash", "numeric|layernorm", "custom|layernorm"]
+    B2: ["text_pca|layernorm", "topics_dist|layernorm", "categorical_emb", "actors_hash", "numeric|layernorm", "custom|layernorm"]
 
-regularization:
-  feature_ablation_switches:
-    use_text: true
-    use_metadata: true
-    use_numeric: true
-    use_topic: true
+imbalance:
+  strategy: class_weight       # default per algorithm can override: {class_weight|focal|cb_loss|smote|smote_tomek|none}
+  focal_gamma: 1.5
+  class_weight_clip: [1.0, 5.0]  # clamp weights into [1,5]
+  smote:
+    kind: smote_nc
+    k_neighbors: 5
+    apply_on: train
+
+algorithms:
+  xgboost:
+    enabled: true
+    fusion: A1
+    params:
+      tree_method: hist         # gpu_hist if gpu: true
+      max_depth: 8
+      learning_rate: 0.05
+      n_estimators: 1200
+      subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 0.0
+      reg_lambda: 1.0
+      max_bin: 256
+      grow_policy: lossguide
+    gpu: false
+    threads: 16
+    imbalance: class_weight
+  lightgbm:
+    enabled: true
+    fusion: A1
+    params:
+      num_leaves: 64
+      max_depth: -1
+      learning_rate: 0.05
+      n_estimators: 2000
+      subsample: 0.8
+      colsample_bytree: 0.8
+      min_child_samples: 20
+      is_unbalance: false       # set true if not using explicit class weights
+    gpu: false
+    threads: 16
+    imbalance: class_weight
+  catboost:
+    enabled: true
+    fusion: A1
+    params:
+      depth: 8
+      learning_rate: 0.05
+      iterations: 2000
+      l2_leaf_reg: 3.0
+      loss_function: MultiClass
+      od_type: IncToDec
+      od_wait: 50
+    gpu: false
+    threads: 16
+    imbalance: class_weight
+  mlp:
+    enabled: true
+    fusion: B1
+    params:
+      hidden_sizes: [512, 256]
+      dropout: 0.3
+      activation: gelu
+      norm: layernorm_per_block   # applies to text/topics/numeric/custom before fusion
+      optimizer: adamw
+      lr: 0.001
+      weight_decay: 0.0001
+      batch_size: 512
+      epochs: 100
+      early_stop_patience: 10
+    gpu: true
+    imbalance: weighted_ce        # {weighted_ce|focal|cb_loss}
+
+evaluation:
+  primary_metrics: ["macro_f1", "brier", "p1_recall"]
+  secondary_metrics: ["per_class_f1", "ece", "latency_ms_per_1k"]
+  calibration:
+    temperature_scaling: true        # applied on validation for neural nets only
+    bins_ece: 15                     # ECE binning used in HTML/JSON report
+  reports_dir: artifacts             # base dir; each run self-creates clf_<TAG>_<TS>/
+  save_pr_curves: true               # if predict_proba available
+  save_confusion_matrices: true
+
+outputs:
+  matrices_format: arrow             # X_*.arrow, y_*.npy from prep step
+  schema_path: artifacts/prep/{prep_id}/schema.json
+  prep_id_format: "{pca_dim}_{pca_var:.2f}_{scaler_hash}_tn{topics_clean_count}"
+

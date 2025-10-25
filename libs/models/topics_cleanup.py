@@ -36,6 +36,7 @@ def load_topics_artifacts(topics_dir: Path):
         manifest = json.load(open(topics_dir / "manifest.json","r",encoding="utf-8"))
     return centroids, info, topw, manifest
 
+
 def cosine_sim_matrix(A: np.ndarray):
     A = A.astype("float32")
     n = (A * A).sum(1, keepdims=True) ** 0.5 + 1e-9

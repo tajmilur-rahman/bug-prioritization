@@ -1,7 +1,7 @@
 # reporting.py
 import os, json, time
 from pathlib import Path
-import numpy as np
+import numpy as np, pandas as pd
 from sklearn.metrics import (
     f1_score, classification_report, confusion_matrix,
     precision_recall_curve, average_precision_score
@@ -24,6 +24,31 @@ def save_label_map(run_dir: Path, labels, label_names):
     lm = {int(l): str(n) for l, n in zip(np.asarray(labels).tolist(), list(label_names))}
     (run_dir / "label_map.json").write_text(json.dumps(lm, indent=2), encoding="utf-8")
     return lm
+
+def save_input_data_information(run_dir: Path, ytr: np.ndarray, yva: np.ndarray, prep_id: str):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,6))
+    grouped_ytr = pd.Series(ytr).value_counts()
+    ax1.pie(grouped_ytr.values, labels=grouped_ytr.index, 
+            autopct=lambda p: f'{p:.1f}%\n({(p/100)*sum(grouped_ytr.values):.0f})')
+    ax1.set_title("Train Labels Distribution")
+    grouped_yva = pd.Series(yva).value_counts()
+    ax2.pie(grouped_yva.values, labels=grouped_yva.index, 
+            autopct=lambda p: f'{p:.1f}%\n\n({(p/100)*sum(grouped_yva.values):.0f})')
+    ax2.set_title("Evaluation Labels Distribution")
+
+    # save input dataset info
+    input_json = {
+        "train_labels_distribution": {k: int(c) for k, c in zip(grouped_ytr.index, grouped_ytr.values)},
+        "val_labels_distribution": {k: int(c) for k, c in zip(grouped_yva.index, grouped_yva.values)},
+        "prep_id": prep_id
+    }
+    (run_dir / "input_info.json").write_text(json.dumps(input_json, indent=2), encoding="utf-8")
+
+    # save figure to file
+    fig.tight_layout()
+    fig_path = run_dir / "figs" / "Train - Val Labels Distribution.png"
+    fig.savefig(fig_path, dpi=140)
+    plt.close(fig)
 
 def _safe_list(obj):
     return obj.tolist() if hasattr(obj, "tolist") else list(obj)

@@ -24,6 +24,34 @@ REPORT_HTML="${REPORT_HTML:-$TOPICS_CLEAN_DIR/preview.html}"
 PREP_CACHE_ROOT="${PREP_CACHE_ROOT:-artifacts/prep}"
 
 
+# --------- 2) APPLY CLEANED MAP TO PARQUETS ---------
+echo "==> [2/5] Apply cleaned topics map to train/val (and test if provided)"
+# options for drop-policy: keep | drop-any-removed | drop_all_removed | drop_b_removed 
+# no drop; drop_any_removed: drop rows where A_clean==-1 or B_clean==-1; drop_all_removed: drop only rows with both clean ids==-1"
+DROP_POLICY="drop_b_removed"
+python libs/models/apply_topics_map_to_parquets.py \
+  --input_glob "$TRAIN_GLOB" \
+  --topics-clean-dir "$TOPICS_CLEAN_DIR" \
+  --out_dir data/train_clean \
+  --drop-policy "$DROP_POLICY"
+echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/train_clean/topics_clean.json
+
+python libs/models/apply_topics_map_to_parquets.py \
+  --input_glob "$VAL_GLOB" \
+  --topics-clean-dir "$TOPICS_CLEAN_DIR" \
+  --out_dir data/val_clean \
+  --drop-policy "$DROP_POLICY"
+echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/val_clean/topics_clean.json
+
+if [[ -n "$TEST_GLOB" ]]; then
+  python libs/models/apply_topics_map_to_parquets.py \
+    --input_glob "$TEST_GLOB" \
+    --topics-clean-dir "$TOPICS_CLEAN_DIR" \
+    --out_dir data/test_clean \
+    --drop-policy "$DROP_POLICY"
+  echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/test_clean/topics_clean.json
+fi
+
 # --------- 3) PREP FROM PARQUETS ---------
 echo "==> [3/5] Build cached matrices (PCA+scaler) from cleaned parquets"
 PREP_LOG="$(mktemp)"
@@ -41,6 +69,9 @@ if [[ -z "$PREP_PATH" ]]; then
 fi
 PREP_ID="$(basename "$PREP_PATH")"
 echo "==> PREP_ID=$PREP_ID"
+
+# Track the drop policy when applying cleaned topics to parquets 
+cp data/train_clean/topics_clean.json $PREP_PATH/topics_clean.json
 
 # Export so trainers that read .env can pick it up if needed
 export PREP_CACHE_ROOT

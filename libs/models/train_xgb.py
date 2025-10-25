@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env", override=False)
 from libs.utils.imbalance import class_weights_from_counts, choose_imbalance_strategy, apply_smote_tomek_if_needed
 from libs.models.io_config import load_yaml, getenv_bool, load_prep_artifacts, read_arrow_matrix, build_test_features_from_csv
-from libs.utils.reporting import make_run_dir, evaluate_and_save
+from libs.utils.reporting import make_run_dir, evaluate_and_save, save_input_data_information
 
 def main():
     ap = argparse.ArgumentParser()
@@ -43,6 +43,12 @@ def main():
     X_val = read_arrow_matrix(art["X_val"])
     ytr = np.load(art["y_train"])
     yva = np.load(art["y_val"])
+
+    # Save run artifacts under artifacts/clf_XGB_YYYYMMDD_HHMMSS
+    run_dir = make_run_dir("XGB", artifacts_root=os.getenv("ARTIFACTS_DIR","artifacts"))
+
+    # save input data info
+    save_input_data_information(run_dir, ytr, yva, args.prep_id)
 
     # Formalize ytr, yva to y_train, y_val
     classes = sorted(pd.unique(pd.concat([pd.Series(ytr), pd.Series(yva)], ignore_index=True)))
@@ -81,8 +87,7 @@ def main():
     model = xgb.XGBClassifier(**params)
     model.fit(X_train, y_train, sample_weight=sample_weight, eval_set=[(X_val, y_val)], verbose=False)
 
-    # Save run artifacts under artifacts/clf_XGB_YYYYMMDD_HHMMSS
-    run_dir = make_run_dir("XGB", artifacts_root=os.getenv("ARTIFACTS_DIR","artifacts"))
+    # Predict
     y_val_pred = model.predict(X_val)
     try:
         y_val_prob = model.predict_proba(X_val)

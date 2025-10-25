@@ -22,7 +22,7 @@ def main():
     ap.add_argument("--input_glob", required=True)
     ap.add_argument("--topics-clean-dir", default="artifacts/topics_clean")
     ap.add_argument("--out_dir", required=True)
-    ap.add_argument("--drop-policy", choices=["keep","drop_any_removed","drop_all_removed"], default="keep",
+    ap.add_argument("--drop-policy", choices=["keep","drop_any_removed","drop_all_removed","drop_b_removed"], default="keep",
                     help="keep: no drop; drop_any_removed: drop rows where A_clean==-1 or B_clean==-1; drop_all_removed: drop only rows with both clean ids==-1")
     args = ap.parse_args()
 
@@ -52,6 +52,11 @@ def main():
                 mask = True
                 if a is not None:
                     mask = mask & (a != -1)
+                if b is not None:
+                    mask = mask & (b != -1)
+                df = df[mask]
+            elif args.drop_policy == "drop_b_removed":
+                mask = True
                 if b is not None:
                     mask = mask & (b != -1)
                 df = df[mask]

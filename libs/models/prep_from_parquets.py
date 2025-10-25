@@ -146,27 +146,27 @@ def main():
     TP_va = np.round(TP_va, 6).astype("float32")
     TP_te = np.round(TP_te, 6).astype("float32") if TP_te is not None else None
 
-    # Small topics embedding = first 'topics_dim' PCs
-    def first_k(A, k):
-        if A is None: return None
-        if A.shape[1] >= k: return A[:, :k]
-        return np.pad(A, ((0,0),(0,k-A.shape[1])))
-
-    T_emb_tr = first_k(TP_tr, topics_dim)
-    T_emb_va = first_k(TP_va, topics_dim)
-    T_emb_te = first_k(TP_te, topics_dim) if TP_te is not None else None
-
 
     # Build centroids from TRAIN ONLY 
     centroids = {}
     min_count = 3  # avoid ultra-noisy centroids; tune as you like
-    topic_col = "topic_id_A_clean" if "topic_id_A_clean" in tr.columns else ("topic_id_B_clean" if "topic_id_B_clean" in tr.columns else None)
-    for tid, idx in tr.groupby(topic_col).groups.items():
-        idx = np.asarray(list(idx))
-        if idx.size >= min_count:
-            centroids[int(tid)] = E_tr[idx].mean(axis=0)
+    #topic_col = "topic_id_A_clean" if "topic_id_A_clean" in tr.columns else ("topic_id_B_clean" if "topic_id_B_clean" in tr.columns else None)
+    topic_col = "topic_id_B_clean" if "topic_id_B_clean" in tr.columns else None
+    def compute_centroids(min_c):
+        t_centroids = {}
+        for tid, idx in tr.groupby(topic_col).groups.items():
+            idx = np.asarray(list(idx))
+            if tid == 122:
+                print("Topic 122 size:", idx.size)
+            if idx.size >= min_c:
+                t_centroids[int(tid)] = E_tr[idx].mean(axis=0)
+        return t_centroids
+    centroids = compute_centroids(min_count)
     centroid_ids = np.array(sorted(centroids.keys()))
-    C_mat = np.vstack([centroids[t] for t in centroid_ids])        # shape: (T, D)
+    #C_mat = np.vstack([centroids[t] for t in centroid_ids])        # shape: (T, D)
+    # Change to use cleaned centroids from topic cleanup steps instead of compute fron TRAIN
+    # since TRAIN is now dropped non labeled docs
+    C_mat = C_clean        # shape: (T, D)
 
     # normalize once for cosine 
     def _norm(a): 
@@ -174,6 +174,7 @@ def main():
         return a / n
 
     C_unit = _norm(C_mat)
+
 
     # Build feature with TopK similarity values of each document to centroids of topics
     def topk_centroid_sims(E, k=32):
@@ -195,6 +196,63 @@ def main():
     S_tr = topk_centroid_sims(E_tr, k=32)
     S_va = topk_centroid_sims(E_va, k=32)
     S_te = topk_centroid_sims(E_te, k=32) if te is not None else None
+
+
+
+    # Build feature with topics embedding from cleaned centroids 
+    # (Get cleaned centroids from topic cleanup step to include all topics since TRAIN is now dropped none label docs. 
+    # To rerun topics job with TRAIN dropped none label docs.)
+    new_roots = sorted({v for v in topics_map.values() if v != -1})
+    def get_cleaned_centroid(topic_id, default=None):
+        mapped = topics_map.get(str(topic_id), -1)
+        if mapped == -1:
+            # Option 1: return None
+            # Option 2 (a consistent shape placeholder):
+            if default is not None:
+                return default
+            else:
+                return np.zeros(C_clean.shape[1], dtype=np.float32)
+        idx = new_roots.index(mapped)
+        return C_clean[idx]
+    
+    def get_topic_centroid(df):
+        if df is None:
+            return None
+        if "topic_id_B_clean" not in df.columns:
+            raise SystemExit("Expected 'topic_id_B_clean' column in parquet splits.")
+        # USE A LIST, not a generator, for np.stack
+        rows = [get_cleaned_centroid(i) for i in df["topic_id_B_clean"]]
+        return np.stack(rows, axis=0).astype("float32")
+    
+    T_cen_tr = get_topic_centroid(tr)
+    T_cen_va = get_topic_centroid(va)
+    T_cen_te = get_topic_centroid(te) if te is not None else None
+    # PCA for topics embedding on TRAIN
+    t_pca = PCA(n_components=min(max_dim, T_cen_tr.shape[1]), svd_solver='full', random_state=0).fit(T_cen_tr)
+    t_csum = np.cumsum(t_pca.explained_variance_ratio_)
+    t_k = int(np.searchsorted(t_csum, target_variance) + 1); t_k = max(1, min(t_k, max_dim))
+    t_pca = PCA(n_components=t_k, svd_solver="full").fit(T_cen_tr)
+
+    T_tr = t_pca.transform(T_cen_tr).astype("float32")
+    T_va = t_pca.transform(T_cen_va).astype("float32")
+    T_te = t_pca.transform(T_cen_te).astype("float32") if T_cen_te is not None else None
+
+    # Small topics embedding = first 'topics_dim' PCs
+    def first_k(A, k):
+        if A is None: return None
+        if A.shape[1] >= k: return A[:, :k]
+        return np.pad(A, ((0,0),(0,k-A.shape[1])))
+
+    # T_emb_tr = first_k(TP_tr, topics_dim)
+    # T_emb_va = first_k(TP_va, topics_dim)
+    # T_emb_te = first_k(TP_te, topics_dim) if TP_te is not None else None
+    # T_emb_tr = first_k(T_tr, topics_dim)
+    # T_emb_va = first_k(T_va, topics_dim)
+    # T_emb_te = first_k(T_te, topics_dim) if T_te is not None else None
+    T_emb_tr = T_tr
+    T_emb_va = T_va
+    T_emb_te = T_te if T_te is not None else None
+
 
 
     # Numeric block
@@ -283,9 +341,10 @@ def main():
     X_tr = hstack(parts_list(TP_tr, T_emb_tr, Xc_tr, Xa_tr, Xn_tr) + [S_tr])
     X_va = hstack(parts_list(TP_va, T_emb_va, Xc_va, Xa_va, Xn_va) + [S_va])
     X_te = hstack(parts_list(TP_te, T_emb_te, Xc_te, Xa_te, Xn_te) + [S_te]) if te is not None else None
+    # X_tr = hstack(parts_list(TP_tr, None, Xc_tr, Xa_tr, Xn_tr) + [S_tr])
+    # X_va = hstack(parts_list(TP_va, None, Xc_va, Xa_va, Xn_va) + [S_va])
+    # X_te = hstack(parts_list(TP_te, None, Xc_te, Xa_te, Xn_te) + [S_te]) if te is not None else None
     
-    # X_va = hstack([TP_va, T_emb_va, Xn_va])
-    # X_te = hstack([TP_te, T_emb_te, Xn_te]) if TP_te is not None else None
 
     # Print dims of splits before scaling
     def dims(name, *blocks):
@@ -294,6 +353,8 @@ def main():
             "→", sum(b.shape[1] for b in blocks if b is not None))
     dims("TR", TP_tr, T_emb_tr, Xc_tr, Xa_tr, Xn_tr, S_tr)
     dims("VA", TP_va, T_emb_va, Xc_va, Xa_va, Xn_va, S_va)
+    # dims("TR", TP_tr, None, Xc_tr, Xa_tr, Xn_tr, S_tr)
+    # dims("VA", TP_va, None, Xc_va, Xa_va, Xn_va, S_va)
 
 
     scaler = StandardScaler(with_mean=True, with_std=True).fit(X_tr)

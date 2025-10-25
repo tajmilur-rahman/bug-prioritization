@@ -24,56 +24,6 @@ REPORT_HTML="${REPORT_HTML:-$TOPICS_CLEAN_DIR/preview.html}"
 PREP_CACHE_ROOT="${PREP_CACHE_ROOT:-artifacts/prep}"
 
 
-# --------- 1) TOPICS CLEANUP ---------
-mkdir -p "$TOPICS_CLEAN_DIR"
-CLEAN_ARGS=(
-  --topics-dir "$TOPICS_DIR"
-  --out-dir "$TOPICS_CLEAN_DIR"
-  --min-size "$MIN_SIZE"
-  --cos-thr "$COS_THR"
-  --jaccard-thr "$JAC_THR"
-  --report-html "$REPORT_HTML"
-)
-if [[ "$USE_JACCARD" == "1" ]]; then CLEAN_ARGS+=(--use-jaccard); fi
-if [[ "$CLEAN_DRY_RUN" == "1" ]]; then CLEAN_ARGS+=(--dry-run); fi
-
-echo "==> [1/5] Topics cleanup (dry-run=$CLEAN_DRY_RUN)"
-python libs/models/topics_cleanup.py "${CLEAN_ARGS[@]}"
-
-if [[ "$CLEAN_DRY_RUN" == "1" ]]; then
-  echo "Dry-run preview generated at: $REPORT_HTML"
-  echo "Stop here (set CLEAN_DRY_RUN=0 to persist mapping/centroids)."
-  exit 0
-fi
-
-# --------- 2) APPLY CLEANED MAP TO PARQUETS ---------
-echo "==> [2/5] Apply cleaned topics map to train/val (and test if provided)"
-# options for drop-policy: keep | drop-any-removed | drop_all_removed | drop_b_removed 
-# no drop; drop_any_removed: drop rows where A_clean==-1 or B_clean==-1; drop_all_removed: drop only rows with both clean ids==-1"
-DROP_POLICY="drop_b_removed"  
-python libs/models/apply_topics_map_to_parquets.py \
-  --input_glob "$TRAIN_GLOB" \
-  --topics-clean-dir "$TOPICS_CLEAN_DIR" \
-  --out_dir data/train_clean \
-  --drop-policy "$DROP_POLICY"
-echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/train_clean/topics_clean.json
-
-python libs/models/apply_topics_map_to_parquets.py \
-  --input_glob "$VAL_GLOB" \
-  --topics-clean-dir "$TOPICS_CLEAN_DIR" \
-  --out_dir data/val_clean \
-  --drop-policy "$DROP_POLICY"
-echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/val_clean/topics_clean.json
-
-if [[ -n "$TEST_GLOB" ]]; then
-  python libs/models/apply_topics_map_to_parquets.py \
-    --input_glob "$TEST_GLOB" \
-    --topics-clean-dir "$TOPICS_CLEAN_DIR" \
-    --out_dir data/test_clean \
-    --drop-policy "$DROP_POLICY"
-  echo "{\"drop-policy\": \"$DROP_POLICY\"}" >> data/test_clean/topics_clean.json
-fi
-
 # --------- 3) PREP FROM PARQUETS ---------
 echo "==> [3/5] Build cached matrices (PCA+scaler) from cleaned parquets"
 PREP_LOG="$(mktemp)"

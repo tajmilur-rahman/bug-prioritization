@@ -1,0 +1,20 @@
+encoder:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  max_len: 160
+  normalize: true
+
+features:
+  use_numeric: true
+  use_meta_small_ohe: true
+  use_meta_learned: false
+  use_topic_id: true
+
+training:
+  random_seed: 42
+  objective: multi:softprob
+  xgb:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.07
+    subsample: 0.9
+    colsample_bytree: 0.9

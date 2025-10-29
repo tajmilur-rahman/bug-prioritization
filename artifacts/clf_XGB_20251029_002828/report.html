@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Classification Report - XGB</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .metric { display: inline-block; margin-right: 12px; padding: 6px 10px; background: #f4f4f4; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Classification Report - XGB</h1>
+  <div>
+    <span class="metric"><b>macro_f1</b>: 0.5494</span>
+    <span class="metric"><b>brier</b>: 0.4960</span>
+    <span class="metric"><b>ece</b>: 0.1411</span>
+    <span class="metric"><b>p1_recall</b>: 0.1224</span>
+  </div>
+  <h3>Confusion Matrix</h3>
+  <img src="figs/confusion_matrix.png" alt="Confusion Matrix" />
+  <h3>Per-class PR Curves</h3>
+  <ul>
+    <li>0: <a href="figs/pr_0.png">view</a> (AP=0.462)</li>
+<li>1: <a href="figs/pr_1.png">view</a> (AP=0.341)</li>
+<li>2: <a href="figs/pr_2.png">view</a> (AP=0.374)</li>
+<li>3: <a href="figs/pr_3.png">view</a> (AP=0.985)</li>
+<li>4: <a href="figs/pr_4.png">view</a> (AP=0.984)</li>
+  </ul>
+  <p style="color:#666; font-size:12px">Artifacts: classification_report.json, confusion_matrix.json, pr_curves.json, label_map.json, metrics.json</p>
+</body>
+</html>

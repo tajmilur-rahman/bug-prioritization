@@ -166,8 +166,19 @@ def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=
     # label_names = label_names or [str(l) for l in labels]
 
     from sklearn.metrics import f1_score
+
+    # Label map: write if not exists
+    lm_path = run_dir / "label_map.json"
+    if not lm_path.exists():
+        lm = save_label_map(run_dir, labels, label_names)
+    else:
+        lm = json.loads((run_dir/"label_map.json").read_text())
+        
     macro_f1 = float(f1_score(y_true, y_pred, average="macro"))
-    p1_recall = float(((y_true==1) & (y_pred==1)).sum() / max(1, (y_true==1).sum())) if 1 in labels else float("nan")
+    name_to_idx = {v: int(k) for k, v in lm.items()}
+    p1_idx = name_to_idx["P1"]
+
+    p1_recall = float(((y_true==p1_idx) & (y_pred==p1_idx)).sum() / max(1, (y_true==p1_idx).sum())) if p1_idx in labels else float("nan")
 
     brier = None; ece = None
     if probs is not None:
@@ -188,10 +199,6 @@ def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=
     if probs is not None:
         pr_json = _save_pr_curves(run_dir, y_true, probs, labels, label_names)
 
-    # Label map: write if not exists
-    lm_path = run_dir / "label_map.json"
-    if not lm_path.exists():
-        _ = save_label_map(run_dir, labels, label_names)
 
     # Save metrics.json
     (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")

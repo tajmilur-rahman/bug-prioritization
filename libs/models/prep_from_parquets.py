@@ -135,7 +135,7 @@ def main():
     pca = PCA(n_components=min(max_dim, E_tr.shape[1]), svd_solver="full", random_state=0).fit(E_tr)
     csum = np.cumsum(pca.explained_variance_ratio_)
     k = int(np.searchsorted(csum, target_variance) + 1); k = max(1, min(k, max_dim))
-    pca = PCA(n_components=k, svd_solver="full").fit(E_tr)
+    pca = PCA(n_components=k, svd_solver="full", random_state=0).fit(E_tr)
 
     TP_tr = pca.transform(E_tr).astype("float32")
     TP_va = pca.transform(E_va).astype("float32")
@@ -177,7 +177,7 @@ def main():
 
 
     # Build feature with TopK similarity values of each document to centroids of topics
-    def topk_centroid_sims(E, k=32):
+    def topk_centroid_sims(E, k=64):
         if E is None: return None
         E_unit = _norm(E)
         sims = E_unit @ C_unit.T                                   # (N, T)
@@ -328,27 +328,31 @@ def main():
     Xa_va = actors_hash_block(va) if ablate.get("use_actors", False) else None
     Xa_te = actors_hash_block(te) if (TP_te is not None and ablate.get("use_actors", False)) else None
 
-    def parts_list(tp, temb, xc, xa, xn):
+    def parts_list(tp, temb, xc, xa, xn, ks):
         parts = []
-        if ablate.get("use_text", True): parts.append(tp)
-        if ablate.get("use_topics", True): parts.append(temb)
+        if ablate.get("use_text", True) and tp is not None: parts.append(tp)
+        if ablate.get("use_topics", True): 
+            if temb is not None: parts.append(temb)
+            if ks is not None: parts.append(ks)
         if xc is not None: parts.append(xc)
         if xa is not None: parts.append(xa)
         if ablate.get("use_numeric", True): parts.append(xn)
         return parts
 
+    # Ablate the blocks
+    #T_emb_tr = None; T_emb_va = None; T_emb_te = None; 
+    #S_tr = None; S_va = None; S_te = None; 
+    #TP_tr = None; TP_va = None; TP_te = None; 
+
     # Now concatenate all selected features
-    X_tr = hstack(parts_list(TP_tr, T_emb_tr, Xc_tr, Xa_tr, Xn_tr) + [S_tr])
-    X_va = hstack(parts_list(TP_va, T_emb_va, Xc_va, Xa_va, Xn_va) + [S_va])
-    X_te = hstack(parts_list(TP_te, T_emb_te, Xc_te, Xa_te, Xn_te) + [S_te]) if te is not None else None
-    # X_tr = hstack(parts_list(TP_tr, None, Xc_tr, Xa_tr, Xn_tr) + [S_tr])
-    # X_va = hstack(parts_list(TP_va, None, Xc_va, Xa_va, Xn_va) + [S_va])
-    # X_te = hstack(parts_list(TP_te, None, Xc_te, Xa_te, Xn_te) + [S_te]) if te is not None else None
+    X_tr = hstack(parts_list(TP_tr, T_emb_tr, Xc_tr, Xa_tr, Xn_tr, S_tr))
+    X_va = hstack(parts_list(TP_va, T_emb_va, Xc_va, Xa_va, Xn_va, S_va))
+    X_te = hstack(parts_list(TP_te, T_emb_te, Xc_te, Xa_te, Xn_te, S_te)) if te is not None else None
     
 
     # Print dims of splits before scaling
     def dims(name, *blocks):
-        print("Dims of feature blocks in splits TR/VA (topic, embedding, categorical, actors, numeric, topKSimilarity):")
+        print("Dims of feature blocks in splits TR/VA (text_pca, topic_centroid_pca, categorical, actors, numeric, topKSimilarity):")
         print(name, [None if b is None else b.shape[1] for b in blocks],
             "→", sum(b.shape[1] for b in blocks if b is not None))
     dims("TR", TP_tr, T_emb_tr, Xc_tr, Xa_tr, Xn_tr, S_tr)
@@ -423,8 +427,8 @@ def main():
     # Emit schema with block spans (optional consumer by trainers)
     blocks = []
     s = 0
-    if ablate.get("use_text", True): blocks.append(("text_pca", TP_tr.shape[1])); s += TP_tr.shape[1]
-    if ablate.get("use_topics", True): blocks.append(("topics_emb", T_emb_tr.shape[1])); s += T_emb_tr.shape[1]
+    if ablate.get("use_text", True) and TP_tr is not None: blocks.append(("text_pca", TP_tr.shape[1])); s += TP_tr.shape[1]
+    if ablate.get("use_topics", True) and T_emb_tr is not None: blocks.append(("topics_emb", T_emb_tr.shape[1])); s += T_emb_tr.shape[1]
     if "Xc_tr" in locals() and Xc_tr is not None: blocks.append(("categorical", Xc_tr.shape[1])); s += Xc_tr.shape[1]
     if "Xa_tr" in locals() and Xa_tr is not None: blocks.append(("actors_hash", Xa_tr.shape[1])); s += Xa_tr.shape[1]
     if ablate.get("use_numeric", True) and Xn_tr is not None: blocks.append(("numeric", Xn_tr.shape[1])); s += Xn_tr.shape[1]

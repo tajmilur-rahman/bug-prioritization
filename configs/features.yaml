@@ -120,7 +120,7 @@ fusion:
 imbalance:
   strategy: class_weight       # default per algorithm can override: {class_weight|focal|cb_loss|smote|smote_tomek|none}
   focal_gamma: 1.5
-  class_weight_clip: [1.0, 5.0]  # clamp weights into [1,5]
+  class_weight_clip: [1.0, 6.0]  # clamp weights into [1,6], changed [1,5] to [1,6] widen a bit; helps P1–P3
   smote:
     kind: smote_nc
     k_neighbors: 5
@@ -178,15 +178,16 @@ algorithms:
     fusion: B1
     params:
       hidden_sizes: [512, 256]
-      dropout: 0.3
+      dropout: 0.40   # from 0.30 for a touch more regularization
       activation: gelu
       norm: layernorm_per_block   # applies to text/topics/numeric/custom before fusion
       optimizer: adamw
-      lr: 0.001
-      weight_decay: 0.0001
+      lr: 0.0007    # from 0.001 for a smoother OneCycle peak
+      weight_decay: 0.0005     # from 0.0001 for generalization
       batch_size: 512
-      epochs: 100
-      early_stop_patience: 10
+      epochs: 120  # from 100, allow longer schedule
+      early_stop_patience: 18  # was 10; avoids premature stop near plateau
+      early_stop_min_delta: 0.0005  # NEW: tiny improvements reset patience
     gpu: true
     imbalance: weighted_ce        # {weighted_ce|focal|cb_loss}
 

@@ -60,11 +60,14 @@ def choose_imbalance_strategy(y_train: Sequence, algo: str) -> Tuple[str, dict]:
 
     elif algo == "mlp":
         if IR <= IR_mild:
+            print("Strategy: weight_ce")
             return "weighted_ce", {}
         elif IR <= IR_mod and n_min >= n_min_thresh:
+            print("Strategy: weight_ce")
             return "weighted_ce", {}
         else:
             gamma = float(os.getenv("FOCAL_GAMMA", 1.5))
+            print("Strategy: focal, GAMMA:", gamma)
             return "focal", {"gamma": gamma}
 
     return "class_weight", {}

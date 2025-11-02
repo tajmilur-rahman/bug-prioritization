@@ -38,7 +38,7 @@ export AUTO_IMBAL_IR_MODERATE="${AUTO_IMBAL_IR_MODERATE:-8}"
 export MINORITY_MIN_SAMPLES="${MINORITY_MIN_SAMPLES:-500}"
 
 # Extract prep dir path via dotenv, fallback to newest folder
-PREP_ID=pca206_v0.95_sc77e03067_tn396   # (the best-run PREP)
+#PREP_ID=pca206_v0.95_sc77e03067_tn396   # (the best-run PREP)
 PREP_PATH="${PREP_ID:-}"
 if [[ -z "$PREP_PATH" ]]; then
   echo "Could not get PREP path from dotenv; falling back to newest dir under $PREP_CACHE_ROOT"

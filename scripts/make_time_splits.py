@@ -2,6 +2,14 @@
 import argparse, os, pandas as pd
 from pathlib import Path
 
+def normalize_df(df):
+    n0 = len(df)
+    df = df.dropna(subset=['priority'])
+    n1 = len(df)
+    print(f"Dropped {n0-n1} rows with NA label")
+    df.reset_index(drop=True)
+    return df
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default="data/bugs_resolved.csv")
@@ -14,6 +22,7 @@ def main():
     df = pd.read_csv(args.input)
     if args.time_col not in df.columns:
         raise SystemExit(f"Missing time column: {args.time_col}")
+    df = normalize_df(df)
     df["_ts"] = pd.to_datetime(df[args.time_col], errors="coerce", utc=True)
     df = df.sort_values("_ts")
     n = len(df)

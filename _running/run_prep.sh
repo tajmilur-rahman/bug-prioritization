@@ -50,7 +50,7 @@ fi
 echo "==> [2/5] Apply cleaned topics map to train/val (and test if provided)"
 # options for drop-policy: keep | drop-any-removed | drop_all_removed | drop_b_removed 
 # no drop; drop_any_removed: drop rows where A_clean==-1 or B_clean==-1; drop_all_removed: drop only rows with both clean ids==-1"
-DROP_POLICY="drop_b_removed"  
+DROP_POLICY="keep"  
 python libs/models/apply_topics_map_to_parquets.py \
   --input_glob "$TRAIN_GLOB" \
   --topics-clean-dir "$TOPICS_CLEAN_DIR" \

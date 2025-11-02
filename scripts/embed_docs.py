@@ -3,6 +3,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from libs.utils.pd_utils import normalize_indices, assign_positional
 
 # Local embedding
 try:
@@ -253,21 +257,34 @@ def run(args):
         })
         # label passthrough if exists
         if "priority" in part.columns:
-            out["priority"] = part["priority"]
+            assign_positional(out, priority=part["priority"])
+
+        # Normalize all indices once
+        part, out, num_df = normalize_indices(part, out, num_df)
 
         # attach numerics
-        out = pd.concat([out.reset_index(drop=True), num_df.reset_index(drop=True)], axis=1)
+        out = pd.concat([out, num_df], axis=1)
 
         # attach optional numeric_from columns (already numeric)
         for col in numeric_from:
-            out[col] = part[col]
+            assign_positional(out, **{col: part[col]})
 
         # attach pass-through columns
         for col in pass_cols:
-            out[col] = part[col]
+            assign_positional(out, **{col: part[col]})
 
         # embedding as a list column (Arrow-friendly)
-        out["embedding"] = [E[i].tolist() for i in range(E.shape[0])]
+        out["embedding"] = list(map(list, E))
+
+        # shape & index invariants
+        assert len(out) == len(part), f"Row count drift in shard (out={len(out)} vs part={len(part)})"
+        assert out.index.equals(part.index), "Index misalignment after construction"
+
+        # label must not become null
+        if "priority" in out.columns:
+            n_null = int(out["priority"].isna().sum())
+            assert n_null == 0, f"priority became null for {n_null} rows in this shard"
+
 
         # write shard
         shard_name = f"part-{start:08d}-{stop:08d}.parquet"

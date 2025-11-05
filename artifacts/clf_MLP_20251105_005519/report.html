@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Classification Report - MLP (pre-calib)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .metric { display: inline-block; margin-right: 12px; padding: 6px 10px; background: #f4f4f4; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Classification Report - MLP (pre-calib)</h1>
+  <div>
+    <span class="metric"><b>macro_f1</b>: 0.6828</span>
+    <span class="metric"><b>brier</b>: 0.4005</span>
+    <span class="metric"><b>ece</b>: 0.0631</span>
+    <span class="metric"><b>p1_recall</b>: 0.6565</span>
+  </div>
+  <h3>Confusion Matrix</h3>
+  <img src="figs/confusion_matrix.png" alt="Confusion Matrix" />
+  <h3>Per-class PR Curves</h3>
+  <ul>
+    <li>0: <a href="figs/pr_0.png">view</a> (AP=0.590)</li>
+<li>1: <a href="figs/pr_1.png">view</a> (AP=0.459)</li>
+<li>2: <a href="figs/pr_2.png">view</a> (AP=0.557)</li>
+<li>3: <a href="figs/pr_3.png">view</a> (AP=0.992)</li>
+<li>4: <a href="figs/pr_4.png">view</a> (AP=0.889)</li>
+  </ul>
+  <p style="color:#666; font-size:12px">Artifacts: classification_report.json, confusion_matrix.json, pr_curves.json, label_map.json, metrics.json</p>
+</body>
+</html>

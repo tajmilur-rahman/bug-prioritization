@@ -1,0 +1,17 @@
+{
+  "train_labels_distribution": {
+    "P3": 14380,
+    "P4": 12825,
+    "P1": 11742,
+    "P2": 11072,
+    "P5": 4322
+  },
+  "val_labels_distribution": {
+    "P4": 2151,
+    "P1": 1473,
+    "P3": 1408,
+    "P2": 1345,
+    "P5": 504
+  },
+  "prep_id": "pca220_v0.95_sc97db8fba_tn55"
+}

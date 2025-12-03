@@ -1,4 +1,31 @@
 # reporting.py
+"""
+These are used by both MLP and XGB:
+    Shared Metrics, macro F1, per-class F1
+    Brier score, ECE calibration
+    Confusion matrix, Normalized confusion matrix, PR curves
+    S1 Recall, S2 Recall
+    Label distribution plots
+    Input dataset info
+    HTML report generator
+    label map
+Shared API Surface:
+    evaluate_and_save(...)
+    save_label_map(...)
+    save_input_data_information(...)
+Shared Outputs: All trainers produce the same artifacts:
+run_dir/
+    metrics.json
+    confusion_matrix.json
+    confusion_matrix_normalized.npy
+    classification_report.json
+    pr_curves.json
+    label_map.json
+    report.html
+    figs/
+
+"""
+
 import os, json, time
 from pathlib import Path
 import numpy as np, pandas as pd
@@ -15,7 +42,7 @@ def now_ts():
     return time.strftime("%Y%m%d_%H%M%S", time.localtime())
 
 def make_run_dir(model_tag: str, artifacts_root: str = "artifacts"):
-    run_dir = Path(artifacts_root) / f"clf_{model_tag}_{now_ts()}"
+    run_dir = Path(artifacts_root) / f"{model_tag}_{now_ts()}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "figs").mkdir(parents=True, exist_ok=True)
     return run_dir
@@ -97,6 +124,14 @@ def _save_confusion(run_dir: Path, y_true, y_pred, labels, label_names):
     fig_path = run_dir / "figs" / "confusion_matrix.png"
     fig.savefig(fig_path, dpi=140)
     plt.close(fig)
+
+    # save normalized confusion matrix
+    row_sums = cm.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1
+    cm_norm = cm.astype(float) / row_sums
+
+    np.save(f"{run_dir}/confusion_matrix_normalized.npy", cm_norm)
+
     return cm_json, str(fig_path)
 
 def _save_pr_curves(run_dir: Path, y_true, probs, labels, label_names):
@@ -104,6 +139,9 @@ def _save_pr_curves(run_dir: Path, y_true, probs, labels, label_names):
     for idx, lbl in enumerate(labels):
         y_bin = (y_true == lbl).astype(int)
         precision, recall, _ = precision_recall_curve(y_bin, probs[:, idx])
+        precision = np.asarray(precision).reshape(-1)
+        recall = np.asarray(recall).reshape(-1)
+
         ap = float(average_precision_score(y_bin, probs[:, idx]))
         curves[str(lbl)] = {
             "average_precision": ap,
@@ -131,7 +169,10 @@ def _write_html_report(run_dir: Path, model_tag: str, metrics: dict, pr_curves: 
     for k, v in pr_curves.items():
         ap = v.get("average_precision", 0.0)
         items.append(f'<li>{label_map.get(int(k),k)}: <a href="figs/pr_{k}.png">view</a> (AP={ap:.3f})</li>')
-    items_html = "\n".join(items)
+    if not pr_curves:
+        items_html = "<li>No PR curves available</li>"
+    else:
+        items_html = "\n".join(items)
     html = f"""<!doctype html>
 <html>
 <head>
@@ -161,7 +202,22 @@ def _write_html_report(run_dir: Path, model_tag: str, metrics: dict, pr_curves: 
 </html>"""
     (run_dir / "report.html").write_text(html, encoding="utf-8")
 
-def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=None, model_tag="MODEL"):
+def class_recall(y_true, y_pred, class_id):
+    mask = (y_true == class_id)
+    if mask.sum() == 0: 
+        return 0.0
+    return (y_pred[mask] == class_id).sum() / mask.sum()
+
+def save_importances(run_dir: Path, importance: dict):
+    (run_dir / "feature_importance.json").write_text(
+        json.dumps(importance, indent=2),
+        encoding="utf-8"
+    )
+
+def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=None, model_tag="MODEL", importance=None):
+    if importance is not None:
+        save_importances(run_dir, importance)
+
     # labels = np.unique(y_true)
     # label_names = label_names or [str(l) for l in labels]
 
@@ -175,19 +231,32 @@ def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=
         lm = json.loads((run_dir/"label_map.json").read_text())
         
     macro_f1 = float(f1_score(y_true, y_pred, average="macro"))
-    name_to_idx = {v: int(k) for k, v in lm.items()}
-    p1_idx = name_to_idx["P1"]
-
-    p1_recall = float(((y_true==p1_idx) & (y_pred==p1_idx)).sum() / max(1, (y_true==p1_idx).sum())) if p1_idx in labels else float("nan")
 
     brier = None; ece = None
     if probs is not None:
         brier = _brier_multiclass(probs, y_true)
         ece = _compute_ece(probs, y_true, n_bins=15)
 
-    metrics = {"macro_f1": macro_f1, "p1_recall": p1_recall}
+    metrics = {"macro_f1": macro_f1}
+    metrics["per_class_f1"] = f1_score(y_true, y_pred, average=None)
     if brier is not None: metrics["brier"] = brier
     if ece is not None: metrics["ece"] = ece
+
+
+     # Recall metric for important labels (P1 or S1/S2) 
+    name_to_idx = {v: int(k) for k, v in lm.items()}
+    p1_idx = name_to_idx.get("P1", None)
+    s1_idx = name_to_idx.get("S1", None)
+    s2_idx = name_to_idx.get("S2", None)
+
+    if p1_idx is not None:
+        #p1_recall = float(((y_true==p1_idx) & (y_pred==p1_idx)).sum() / max(1, (y_true==p1_idx).sum())) if p1_idx in labels else float("nan")
+        metrics["p1_recall"] = class_recall(y_true, y_pred, p1_idx)
+    if s1_idx is not None:
+        metrics["s1_recall"] = class_recall(y_true, y_pred, s1_idx)
+    if s2_idx is not None:
+        metrics["s2_recall"] = class_recall(y_true, y_pred, s2_idx)
+
 
     # Report JSON
     clf_rep = _classification_report_json(y_true, y_pred, labels, label_names)

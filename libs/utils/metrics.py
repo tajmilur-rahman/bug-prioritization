@@ -22,3 +22,49 @@ def ece(probs: np.ndarray, y_true: np.ndarray, n_bins: int = 15) -> float:
         bin_conf = conf[mask].mean()
         ece_val += (mask.mean()) * abs(bin_acc - bin_conf)
     return float(ece_val)
+
+# -----------------------------------------------------------
+# metric_hybrid.py — hybrid scoring for ranking ML models
+# -----------------------------------------------------------
+
+import numpy as np
+from sklearn.metrics import (
+    f1_score,
+    balanced_accuracy_score,
+    confusion_matrix
+)
+
+
+def macro_f1(y, p):
+    return f1_score(y, p, average="macro")
+
+def head_class_f1(y, p, rare_classes=None):
+    if rare_classes is None:
+        return macro_f1(y, p)
+    f = {}
+    for c in rare_classes:
+        f[c] = f1_score((y == c), (p == c))
+    return np.mean(list(f.values()))
+
+def hybrid_score(y_true, probs, rare_classes=None):
+    preds = probs.argmax(1)
+
+    F1_macro = macro_f1(y_true, preds)
+    BA = balanced_accuracy_score(y_true, preds)
+    ECE_ = ece(probs, y_true)
+    RareF1 = head_class_f1(y_true, preds, rare_classes)
+
+    # combine (tuned for severity classification)
+    score = (
+        0.45 * F1_macro +
+        0.25 * BA +
+        0.20 * RareF1 +
+        0.10 * (1 - ECE_)
+    )
+    return {
+        "macro_f1": float(F1_macro),
+        "balanced_accuracy": float(BA),
+        "rare_f1": float(RareF1),
+        "ece": float(ECE_),
+        "hybrid": float(score),
+    }

@@ -1,0 +1,432 @@
+STEP 1 — build_bugs_dataset.py
+    Output: data/bugs_cleaned.csv
+    Key Points of the Script:
+
+        Unifies both severity & priority label normalization (severity_norm, priority_norm)
+
+        Drops only rows with missing both labels, not only one label
+
+        Adds full analytics features (desc_lines, duplicate_ratio, etc.)
+
+        Keeps chunking for memory safety
+
+        Writes final canonical dataset: data/bugs_cleaned.csv
+
+        Compatible with both tasks downstream
+
+        Trainer/prep will pick LABEL_KIND=severity or priority to filter rows
+
+STEP 2 — embedding job (parallel, shards)
+    Output: data/embeddings/shards/*.parquet
+
+STEP 3 — topic job + cleanup
+    Output: data/topics/topics.parquet
+            artifacts/topics/*  (model, centroids, etc.)
+
+STEP 4 — merge_enrichment.py (NEW)
+    Output: data/bugs_enriched.parquet
+            (cleaned + embeddings + topics)
+
+STEP 5 — prep_from_parquets.py
+    - load enriched parquet
+    - split train/val/test
+    - PCA / scaling
+    - fusion
+    Output: artifacts/prep/<id>/...
+
+STEP 6 — training scripts (XGB, MLP)
+    - severity-aware metrics
+    - SHAP / IG / PermIM
+    Output: artifacts/models/...
+
+STEP 7 — reporting.py, compare_reports.py
+    - use severity metrics
+    Output: results/*.json
+
+STEP 8 — run_analytics.py (NEW)
+    - uses bugs_enriched.parquet
+    Output: analytics/*
+
+
+
+
+
+What is inside bugs_enriched.parquet?
+
+bugs_enriched.parquet is the full, enriched, unified dataset after: dataset building -> embedding -> topic modeling -> enrichment merging
+
+This file contains everything required for: training, analytics, feature engineering
+
+Below is structure of fields inside bugs_enriched.parquet.
+
+📌 Core Fields (Raw Bugzilla Data)
+Column	Description
+id	Bug ID
+summary	Bug summary text
+description	Bug description text
+product	Bugzilla product
+component	Bugzilla component
+platform	Platform
+op_sys	Operating system
+priority_raw	Raw Bugzilla priority string
+severity_raw	Raw Bugzilla severity string
+creation_time	Timestamp
+last_change_time	Timestamp
+other raw Bugzilla fields	depends on your dataset
+📌 Engineered Feature Columns
+
+Text statistics: summary_len, desc_len, desc_lines, desc_words, desc_unique_words, desc_paragraphs
+
+Crash / structural indicators: has_stacktrace, has_crash_sig, crash_sig_len, crash_kw_score, severity_kw_score
+
+Graph / dependency counts: duplicates_count, duplicate_ratio, depends_on_count, blocks_count, regressions_count, regressed_by_count, cc_count, attachments_count, comment_count, votes
+
+📌 Label Columns
+
+Two parallel label spaces:
+
+Severity labels
+
+severity_raw
+
+severity_norm → canonical S1/S2/S3/S4
+
+Priority labels
+
+priority_raw
+
+priority_norm → canonical P1/P2/P3/P4/P5
+
+📌 Embedding Column
+embedding      → numpy array, ~384-dim from MiniLM
+Stored as: object dtype, each row = np.ndarray
+This is fed into PCA during prep.
+
+📌 Topic Columns
+From topic_jobs + cleanup:
+topic_A_clean, topic_B_clean
+
+📌 Why changed to this layout
+
+Because it lets the pipeline:
+- generate clean features once
+- run embedding once
+- run topics once
+- run ML prep separately for severity/priority
+- run analytics on unified fields
+- avoid duplicated storage
+- preserve all possible stats for both tasks
+
+This is the ideal structure for a large-scale ML/SE pipeline.
+
+
+
+prep_from_parquets (prepare features for training) PIPELINE:
+Work based on input data/bugs_enriched.parquet 
+        │
+        ├── Filter rows (strict): embedding + topic_B_clean + label available
+        │
+        ├── Time-based split (TRAIN/VAL/TEST from .env)
+        │
+        ├── Load centroids + topic_map (Option 2 structure)
+        │
+        ├── Build topic embedding PCA
+        │
+        ├── Build text embedding PCA (MiniLM)
+        │
+        ├── Build Top-K similarity features
+        │
+        ├── Build numeric block
+        │
+        ├── Build categorical PCA-embedded block (Option B)
+        │
+        ├── Build actors hash block
+        │
+        ├── Apply fusion scheme (A1–A4, B1–B2)
+        │
+        ├── StandardScaler (train-fit, val/test-transform)
+        │
+        ├── Save feature matrices to artifacts/prep/<prep_id>
+        │       X_train.arrow
+        │       X_val.arrow
+        │       X_test.arrow
+        │       y_train.npy
+        │       y_val.npy
+        │       y_test.npy
+        │
+        └── (Optional) export analytics/full_features.parquet
+
+Output of prep step:
+artifacts/prep/<prep_id>/
+    topic_centroids.clean.npy
+    topics_map.clean.json
+    ...
+
+
+Train MLP:
+✔ Key Features of Imbalance Handling
+✔ Supports all imbalance strategies
+
+IMBALANCE=focal
+
+IMBALANCE=weighted_ce
+
+IMBALANCE=class_weight
+
+IMBALANCE=none
+
+✔ Supports CORAL ordinal loss
+
+Reduces over/under-classification distance.
+
+✔ Class weights automatically computed
+
+Using inverse-frequency with clipping.
+
+✔ Hybrid loss returns:
+
+total loss
+
+pure CE loss
+
+pure Ordinal loss
+
+Useful for analytics & TensorBoard (if added).
+
+
+MLP training loop key features:
+
+AMP-accelerated
+
+early-stopping aware
+
+gradient clipped
+
+OneCycleLR scheduled
+
+Hybrid (CE + Ordinal) supervised
+
+
+OUTPUT DIR STRUCTURE for classification training:
+artifacts/models/<label>/<prep_id>/clf_<algo>_<fusion>_<timestamp>/
+
+
+
+Summary of outputs from each step:
+1. build_bugs_dataset.py        → data/bugs_cleaned.csv
+2. embed.py                     → data/embeddings/shards/*.parquet
+3. topics_fit & topics_assign   → artifacts/topics + artifacts/topics_clean
+4. merge_enrichment.py          → data/bugs_enriched.parquet
+5. prep_from_parquets.py        → artifacts/prep/<prep_id>
+6. train_mlp.py / train_xgb.py  → artifacts/models/<label>/<prep_id>/clf_...
+7. run_analytics.py             → analytics/<label>/<prep_id>
+
+
+
+
+
+Logs from the latest running for steps of the pipeline.
+
+============================================================
+              BUG PRIORITIZATION FULL PIPELINE              
+============================================================
+LABEL_KIND: severity
+FUSION:     B1
+============================================================
+
+[1] Building cleaned bugs dataset...
+[phase1] Streaming input → chunked CSVs …
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_000.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_001.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_002.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_003.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_004.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_005.csv
+[phase1] Writing clean chunk → artifacts/bugs_chunks/clean/bugs_clean_006.csv
+[phase1] Writing final clean chunk → artifacts/bugs_chunks/clean/bugs_clean_007.csv
+[phase1] Processed total 750750 bugs.
+
+[phase2] Reading clean chunks → merge & normalize labels …
+[clean_training_data] Dropped insufficient features: 0/66209
+[clean_training_data] Dropped missing both labels: 12787/66209
+[clean_training_data] Dropped insufficient features: 0/59858
+[clean_training_data] Dropped missing both labels: 25177/59858
+[clean_training_data] Dropped insufficient features: 0/61053
+[clean_training_data] Dropped missing both labels: 28028/61053
+[clean_training_data] Dropped insufficient features: 0/61825
+[clean_training_data] Dropped missing both labels: 28328/61825
+[clean_training_data] Dropped insufficient features: 0/59049
+[clean_training_data] Dropped missing both labels: 23809/59049
+[clean_training_data] Dropped insufficient features: 0/56086
+[clean_training_data] Dropped missing both labels: 11127/56086
+[clean_training_data] Dropped insufficient features: 0/61040
+[clean_training_data] Dropped missing both labels: 11646/61040
+[clean_training_data] Dropped insufficient features: 0/21541
+[clean_training_data] Dropped missing both labels: 4422/21541
+severity_norm
+S3      46825
+None    31423
+S4       8521
+S2       5657
+S1       1604
+Name: count, dtype: int64
+priority_norm
+None    21349
+P3      18835
+P4      17591
+P1      15845
+P2      14860
+P5       5550
+Name: count, dtype: int64
+[done] Merged 94030 rows → data/bugs_cleaned.csv
+
+
+[2] Embedding stage...
+
+Text cols:  ['summary', 'description']
+[embed] Total input rows: 94030, shard_size=50000
+[embed] wrote shard data/embeddings/shards/emb_00000000_00050000.parquet, rows=50000, new=50000, cached=0
+[embed] wrote shard data/embeddings/shards/emb_00050000_00094030.parquet, rows=44030, new=44030, cached=0
+[embed] DONE → data/embeddings/shards
+
+
+[3] Topic modeling...
+[topics] Loading embeddings…
+Embedding rows  -  14104
+Bugs rows  -  94030
+Merged rows - 14104
+        id  ...                                        description
+0   764062  ...  The address bar has a feature where you start ...
+1  1668218  ...  As soon as the new Performance panel is ready ...
+2  1024312  ...                                                NaN
+3  1720880  ...  See last few comments in bug 1710556. Not sure...
+4   893820  ...  User Agent: Mozilla/5.0 (Windows NT 6.2; WOW64...
+
+[5 rows x 4 columns]
+2025-12-02 23:11:33,240 - BERTopic - Dimensionality - Fitting the dimensionality reduction algorithm
+UMAP(angular_rp_forest=True, metric='cosine', min_dist=0.0, n_components=5, n_jobs=1, random_state=42, verbose=True)
+OMP: Info #276: omp_set_nested routine deprecated, please use omp_set_max_active_levels instead.
+Tue Dec  2 23:11:33 2025 Construct fuzzy simplicial set
+Tue Dec  2 23:11:33 2025 Finding Nearest Neighbors
+Tue Dec  2 23:11:33 2025 Building RP forest with 11 trees
+Tue Dec  2 23:11:34 2025 NN descent for 14 iterations
+         1  /  14
+         2  /  14
+         3  /  14
+         4  /  14
+         5  /  14
+         6  /  14
+        Stopping threshold met -- exiting after 6 iterations
+Tue Dec  2 23:11:39 2025 Finished Nearest Neighbor Search
+Tue Dec  2 23:11:39 2025 Construct embedding
+Epochs completed:   0%|                                                                                                                   0/200 [00:00]completed  0  /  200 epochs
+Epochs completed:   9%| ██████████                                                                                                       18/200 [00:00]completed  20  /  200 epochs
+Epochs completed:  19%| █████████████████████▎                                                                                           38/200 [00:01]completed  40  /  200 epochs
+Epochs completed:  29%| ████████████████████████████████▍                                                                                58/200 [00:01]completed  60  /  200 epochs
+Epochs completed:  39%| ███████████████████████████████████████████▋                                                                     78/200 [00:02]completed  80  /  200 epochs
+Epochs completed:  49%| ██████████████████████████████████████████████████████▉                                                          98/200 [00:02]completed  100  /  200 epochs
+Epochs completed:  59%| █████████████████████████████████████████████████████████████████▍                                              118/200 [00:03]completed  120  /  200 epochs
+Epochs completed:  69%| ████████████████████████████████████████████████████████████████████████████▌                                   138/200 [00:03]completed  140  /  200 epochs
+Epochs completed:  79%| ███████████████████████████████████████████████████████████████████████████████████████▋                        158/200 [00:03]completed  160  /  200 epochs
+Epochs completed:  89%| ██████████████████████████████████████████████████████████████████████████████████████████████████▊             178/200 [00:04]completed  180  /  200 epochs
+Epochs completed: 100%| ███████████████████████████████████████████████████████████████████████████████████████████████████████████████ 200/200 [00:04]
+Tue Dec  2 23:11:45 2025 Finished embedding
+2025-12-02 23:11:45,199 - BERTopic - Dimensionality - Completed ✓
+2025-12-02 23:11:45,199 - BERTopic - Cluster - Start clustering the reduced embeddings
+2025-12-02 23:11:45,473 - BERTopic - Cluster - Completed ✓
+2025-12-02 23:11:45,474 - BERTopic - Representation - Fine-tuning topics using representation models.
+2025-12-02 23:11:46,652 - BERTopic - Representation - Completed ✓
+2025-12-02 23:11:47,361 - BERTopic - WARNING: When you use `pickle` to save/load a BERTopic model,please make sure that the environments in which you saveand load the model are **exactly** the same. The version of BERTopic,its dependencies, and python need to remain the same.
+Tue Dec  2 23:11:47 2025 Worst tree score: 0.31941293
+Tue Dec  2 23:11:47 2025 Mean tree score: 0.32960991
+Tue Dec  2 23:11:47 2025 Best tree score: 0.34763188
+Tue Dec  2 23:11:48 2025 Forward diversification reduced edges from 211560 to 84964
+Tue Dec  2 23:11:49 2025 Reverse diversification reduced edges from 84964 to 84964
+Tue Dec  2 23:11:49 2025 Degree pruning reduced edges from 101632 to 101345
+Tue Dec  2 23:11:49 2025 Resorting data and graph based on tree order
+Tue Dec  2 23:11:49 2025 Building and compiling search function
+[topics.fit] topics=96
+[topics.fit] wrote interpretability files in artifacts/topics
+
+
+[topics_cleanup] Cleaned topics written to: artifacts/topics_clean
+[topics_cleanup] New topics count: 95
+[topics_cleanup] Removed topics: 1
+[topics_cleanup] Merged pairs: 1
+assign:   0%|                                                                                                                    | 0/2 [00:00<?, ?it/s]Tue Dec  2 23:13:37 2025 Building and compiling search function
+OMP: Info #276: omp_set_nested routine deprecated, please use omp_set_max_active_levels instead.
+                                                                                                                                                      completed  0  /  30 epochs                                                                                                                  0/30 [00:00]
+                                                                                                                                                      completed  3  /  30 epochs██▊                                                                                                               1/30 [00:00]
+                                                                                                                                                      completed  6  /  30 epochs██████████████████                                                                                                5/30 [00:00]
+                                                                                                                                                      completed  9  /  30 epochs█████████████████████████████████▏                                                                                9/30 [00:00]
+                                                                                                                                                      completed  12  /  30 epochs███████████████████████████████████████████▏                                                                    12/30 [00:00]
+                                                                                                                                                      completed  15  /  30 epochs██████████████████████████████████████████████████████▌                                                         15/30 [00:00]
+                                                                                                                                                      completed  18  /  30 epochs█████████████████████████████████████████████████████████████████▊                                              18/30 [00:00]
+                                                                                                                                                      completed  21  /  30 epochs█████████████████████████████████████████████████████████████████████████████                                   21/30 [00:01]
+                                                                                                                                                      completed  24  /  30 epochs████████████████████████████████████████████████████████████████████████████████████████▍                       24/30 [00:01]
+                                                                                                                                                      completed  27  /  30 epochs███████████████████████████████████████████████████████████████████████████████████████████████████▋            27/30 [00:01]
+Epochs completed: 100%| █████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 30/30 [00:01]
+assign:  50%|██████████████████████████████████████████████████████                                                      | 1/2 [00:09<00:09,  9.61s/it]Tue Dec  2 23:13:46 2025 Building and compiling search function
+                                                                                                                                                      completed  0  /  30 epochs                                                                                                                  0/30 [00:00]
+        completed  3  /  30 epochs
+                                                                                                                                                      completed  6  /  30 epochs██████████████████                                                                                                5/30 [00:00]
+                                                                                                                                                      completed  9  /  30 epochs█████████████████████████████████▏                                                                                9/30 [00:00]
+                                                                                                                                                      completed  12  /  30 epochs███████████████████████████████████████████▏                                                                    12/30 [00:00]
+                                                                                                                                                      completed  15  /  30 epochs██████████████████████████████████████████████████████▌                                                         15/30 [00:00]
+                                                                                                                                                      completed  18  /  30 epochs█████████████████████████████████████████████████████████████████▊                                              18/30 [00:00]
+                                                                                                                                                      completed  21  /  30 epochs█████████████████████████████████████████████████████████████████████████████                                   21/30 [00:00]
+                                                                                                                                                      completed  24  /  30 epochs████████████████████████████████████████████████████████████████████████████████████████▍                       24/30 [00:00]
+                                                                                                                                                      completed  27  /  30 epochs███████████████████████████████████████████████████████████████████████████████████████████████████▋            27/30 [00:01]
+Epochs completed: 100%| █████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 30/30 [00:01]
+assign: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2/2 [00:16<00:00,  8.39s/it]
+[topics.assign] wrote 2 shards → *.topics.parquet
+
+
+
+4] Merge enrichment...
+
+[merge] Loading cleaned bugs …
+[merge] Loading embeddings shards …
+[merge] Loading topics …
+[merge] bugs rows      = 94030
+[merge] embeddings rows = 94030
+[merge] topics rows     = 94030
+[merge] Merging embeddings on id …
+[merge] Merging topics on id …
+[merge] Writing atomic output → data/bugs_enriched.parquet
+[merge] Completed. Enriched dataset stored at:
+  data/bugs_enriched.parquet
+
+
+[5] Running prep_from_parquets.py ...
+[prep] Loaded 94030 rows
+severity_norm
+S3    46825
+S4     8521
+S2     5657
+S1     1604
+Name: count, dtype: int64
+[prep] Dropped 31423, remaining 62607
+[prep] Split → train=50087, val=6260, test=6260
+[prep] Text PCA dims = 224
+[prep] Topic PCA dims = 51
+[prep] TopK dims = 32
+[prep] Numeric dims = 15
+[prep] Categorical dims = 112
+[prep] Actors disabled
+[prep] Final dims → train=(50087, 434), val=(6260, 434), test=(6260, 434)
+[prep] Writing artifacts to: artifacts/prep/pca224_tv0.95_sc2644d7b1_nt95_fmB1
+[prep] DONE. Artifacts ready at: artifacts/prep/pca224_tv0.95_sc2644d7b1_nt95_fmB1
+PREP_PATH detected: artifacts/prep/pca224_tv0.95_sc2644d7b1_nt95_fmB1
+
+
+[6] Training models...
+==> PREP_ID=pca224_tv0.95_sc2644d7b1_nt95_fmB1
+[{'name': 'text_pca', 'start': 0, 'end': 224}, {'name': 'topic_pca', 'start': 224, 'end': 275}, {'name': 'categorical', 'start': 275, 'end': 387}, {'name': 'numeric', 'start': 387, 'end': 402}, {'name': 'topK_sims', 'start': 402, 'end': 434}]
+{'epochs': 120, 'batch_size': 512, 'lr': 0.0007, 'weight_decay': 0.0005, 'early_stop': 18, 'early_stop_min_delta': 0.0005, 'scheduler': 'onecycle', 'grad_clip': 1.0, 'hidden': [512, 256], 'dropout': 0.4, 'act': 'gelu', 'norm': 'layernorm_per_block', 'droppath': 0.05, 'droppath_schedule': 'linear', 'amp': True}
+
+With ordinal head.
+{'epochs': 120, 'batch_size': 512, 'lr': 0.0007, 'weight_decay': 0.0005, 'early_stop': 18, 'early_stop_min_delta': 0.0005, 'scheduler': 'onecycle', 'grad_clip': 1.0, 'hidden': [512, 256], 'dropout': 0.4, 'act': 'gelu', 'norm': 'layernorm_per_block', 'droppath': 0.05, 'droppath_schedule': 'linear', 'amp': True}
+Sampler: hybrid
+
+...

@@ -14,7 +14,7 @@ data:
   input_path: data/bugs_resolved.csv          # raw dataset (can be csv/parquet)
   id_col: id
   text_cols: ["summary", "description"]
-  label_col: priority
+  label_col: sec
   # pre-split by time (keep these boundaries to preserve drift testing)
   splits:
     time_based: true
@@ -25,7 +25,7 @@ data:
   filters:
     min_text_len: 16
     drop_if_missing_label: true
-    allowed_labels: ["P1", "P2", "P3", "P4", "P5"]
+    allowed_labels: ["P1", "P2", "P3", "P4", "P5"]  # or ["S1", "S2", "S3", "S4"]
 
 prep:
   cache:
@@ -63,7 +63,7 @@ embeddings:
   text:
     model: sentence-transformers/all-MiniLM-L6-v2
     #cache_path: artifacts/embeddings/text
-    truncate_tokens: 160
+    truncate_tokens: 190
     # produced field name (consumed by PCA): text_embeddings
 
 features:
@@ -97,9 +97,22 @@ features:
   # ----- Numeric / counts -----
   numeric:
     use: true
-    cols: ["summary_len", "desc_len", "url_count", "code_fence_count",
-           "comment_count", "attachments_count", "duplicates_count",
-           "depends_on_count", "blocks_count", "votes"]
+    cols:
+      - summary_len
+      - desc_len
+      - url_count
+      - code_fence_count
+      - comment_count
+      - attachments_count
+      - duplicates_count        # or duplicate_ratio
+      - depends_on_count
+      - blocks_count
+      - regressions_count
+      - regressed_by_count
+      - cc_count
+      - votes
+      - has_stacktrace
+      - has_crash_sig
     clip_quantiles: [0.0, 0.999]   # guard extreme outliers before scaling
 
   # ----- Custom fields (scalar subset) -----

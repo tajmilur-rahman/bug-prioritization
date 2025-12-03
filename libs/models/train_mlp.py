@@ -281,10 +281,10 @@ def main():
     print(cfg)
     
     if cfg["scheduler"] == "onecycle":
-        # steps_per_epoch = math.ceil(len(X_train) / cfg["batch_size"])
+        steps_per_epoch = math.ceil(len(X_train) / cfg["batch_size"])
         # total_steps = cfg["epochs"] * steps_per_epoch
         sched = torch.optim.lr_scheduler.OneCycleLR(
-            opt, max_lr=cfg["lr"], total_steps=cfg["epochs"],
+            opt, max_lr=cfg["lr"], epochs=cfg["epochs"], steps_per_epoch=steps_per_epoch,
         )
     else:
         sched = None
@@ -316,14 +316,14 @@ def main():
         per_cls = max(1, bs // len(classes))
         pools = {c: np.where(y_np == c)[0] for c in classes}
 
-        while True:
+        steps_per_epoch = int(np.ceil(len(X) / bs))
+
+        for _ in range(steps_per_epoch):
             idxs = []
             for c in classes:
                 if len(pools[c]):
                     sel = np.random.choice(pools[c], size=per_cls, replace=True)
                     idxs.extend(sel.tolist())
-            if not idxs:
-                break
             np.random.shuffle(idxs)
             yield X[idxs], y[idxs]
 
@@ -336,7 +336,9 @@ def main():
         classes = np.unique(y_np)
         pools = {c: np.where(y_np == c)[0] for c in classes}
 
-        while True:
+        steps_per_epoch = int(np.ceil(len(X) / bs))
+
+        for _ in range(steps_per_epoch):
             # balanced part
             idx_bal = []
             per_cls = max(1, balanced_bs // len(classes))
@@ -407,11 +409,11 @@ def main():
             scaler.step(opt)
             scaler.update()
 
-            #if sched: sched.step()
+            if sched: sched.step()
 
             total_loss += float(loss) * len(xb)
 
-        if sched: sched.step()
+        #if sched: sched.step()
         
         total_loss /= len(X_train)
 

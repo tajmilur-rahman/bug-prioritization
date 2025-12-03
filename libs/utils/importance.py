@@ -25,14 +25,13 @@ __all__ = [
     "integrated_gradients_global",
     "block_importance",
     "compute_all_importance",
+    "integrated_gradients_compare",
 ]
 
 
 # ============================================================
 # LOAD BLOCK SCHEMA
 # ============================================================
-
-
 def get_block_schema(schema):
     """
     schema["used_blocks"]: ordered list of block names
@@ -68,6 +67,74 @@ def slice_blocks(X: np.ndarray, schema):
 
     return out
 
+# ============================================================
+# INTERGRATED GRADIENT COMPARE
+# ============================================================
+def integrated_gradients_compare(
+    model,
+    X_sample,
+    true_class=None,
+    baseline=None,
+    n_steps=50,
+    device="cpu"
+):
+    """
+    Returns:
+        pred_class, true_class
+        ig_pred: feature attributions for predicted class
+        ig_true: feature attributions for true class (optional)
+    """
+    model.eval()
+    xs = torch.tensor(X_sample[None, :], dtype=torch.float32).to(device)
+
+    if baseline is None:
+        baseline = torch.zeros_like(xs)
+
+    # ---- predicted class ----
+    with torch.no_grad():
+        logits = model(xs)
+        pred_class = logits.argmax(dim=1).item()
+
+    ig = IntegratedGradients(model)
+
+    # IG for predicted class
+    ig_pred = ig.attribute(
+        xs,
+        baselines=baseline,
+        n_steps=n_steps,
+        target=pred_class
+    ).detach().cpu().numpy().reshape(-1)
+
+    # ---- IG for true class ----
+    ig_true = None
+    if true_class is not None:
+        ig_true = ig.attribute(
+            xs,
+            baselines=baseline,
+            n_steps=n_steps,
+            target=int(true_class)
+        ).detach().cpu().numpy().reshape(-1)
+
+    return pred_class, true_class, ig_pred, ig_true
+
+
+import matplotlib.pyplot as plt
+
+def plot_compare_ig(feature_names, ig_pred, ig_true, pred_class, true_class):
+    width = 0.35
+    idx = np.arange(len(feature_names))
+
+    plt.figure(figsize=(14,6))
+    plt.title(f"Integrated Gradients — Predicted vs True Class\nPred={pred_class}, True={true_class}")
+
+    plt.bar(idx - width/2, ig_pred, width, label=f"Predicted (class {pred_class})", alpha=0.7)
+    if ig_true is not None:
+        plt.bar(idx + width/2, ig_true, width, label=f"True (class {true_class})", alpha=0.7)
+
+    plt.xticks(idx, feature_names, rotation=90)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 # ============================================================
 # FAST PERMUTATION IMPORTANCE
@@ -263,10 +330,10 @@ def compute_all_importance(
     # block_scores = block_importance(perm, block_schema)
     # json.dump(block_scores, open(os.path.join(save_dir, "block_importance.json"), "w"), indent=2)
 
-    print("[importance] Integrated gradients…")
-    ig = integrated_gradients_global(model, X, device=device)
-    np.save(os.path.join(save_dir, "ig_feature.npy"), ig)
+    # print("[importance] Integrated gradients…")
+    # ig = integrated_gradients_global(model, X, device=device)
+    # np.save(os.path.join(save_dir, "ig_feature.npy"), ig)
 
-    print("[importance] DONE →", save_dir)
+    # print("[importance] DONE →", save_dir)
 
-    return {"perm": perm, "ig": ig}
+    return {"perm": perm, "ig": None}

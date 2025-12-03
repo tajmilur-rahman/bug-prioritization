@@ -186,10 +186,12 @@ def _write_html_report(run_dir: Path, model_tag: str, metrics: dict, pr_curves: 
 <body>
   <h1>Classification Report - {model_tag}</h1>
   <div>
-    <span class="metric"><b>macro_f1</b>: {metrics.get("macro_f1","n/a"):.4f}</span>
-    <span class="metric"><b>brier</b>: {metrics.get("brier","n/a"):.4f}</span>
-    <span class="metric"><b>ece</b>: {metrics.get("ece","n/a"):.4f}</span>
-    <span class="metric"><b>p1_recall</b>: {metrics.get("p1_recall","n/a"):.4f}</span>
+    <span class="metric"><b>macro_f1</b>: {metrics.get("macro_f1","n/a")}</span>
+    <span class="metric"><b>brier</b>: {metrics.get("brier","n/a")}</span>
+    <span class="metric"><b>ece</b>: {metrics.get("ece","n/a")}</span>
+    <span class="metric"><b>p1_recall</b>: {metrics.get("p1_recall","n/a")}</span>
+    <span class="metric"><b>s1_recall</b>: {metrics.get("s1_recall","n/a")}</span>
+    <span class="metric"><b>s2_recall</b>: {metrics.get("s2_recall","n/a")}</span>
   </div>
   <h3>Confusion Matrix</h3>
   <img src="figs/confusion_matrix.png" alt="Confusion Matrix" />
@@ -238,7 +240,7 @@ def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=
         ece = _compute_ece(probs, y_true, n_bins=15)
 
     metrics = {"macro_f1": macro_f1}
-    metrics["per_class_f1"] = f1_score(y_true, y_pred, average=None)
+    metrics["per_class_f1"] = f1_score(y_true, y_pred, average=None).tolist()
     if brier is not None: metrics["brier"] = brier
     if ece is not None: metrics["ece"] = ece
 
@@ -257,6 +259,7 @@ def evaluate_and_save(run_dir: Path, y_true, y_pred, labels, label_names, probs=
     if s2_idx is not None:
         metrics["s2_recall"] = class_recall(y_true, y_pred, s2_idx)
 
+    print(metrics)
 
     # Report JSON
     clf_rep = _classification_report_json(y_true, y_pred, labels, label_names)

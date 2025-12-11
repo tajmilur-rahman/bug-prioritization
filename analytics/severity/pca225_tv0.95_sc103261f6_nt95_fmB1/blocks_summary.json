@@ -1,0 +1,8 @@
+{
+  "text_pca": 225,
+  "topic_pca": 51,
+  "categorical": 112,
+  "actors_hash": 0,
+  "numeric": 15,
+  "topK_sims": 32
+}

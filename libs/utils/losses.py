@@ -122,6 +122,35 @@ class CORALOrdinalLoss(nn.Module):
         return F.binary_cross_entropy_with_logits(logits, y, reduction="mean")
 
 
+class HybridOrdinalRegressionLoss(nn.Module):
+    def __init__(self, lambda_reg=0.3, reg_type="mse"):
+        super().__init__()
+        self.lambda_reg = lambda_reg
+        self.reg_type = reg_type
+        self.coral = CORALOrdinalLoss()
+
+        if reg_type == "mse":
+            self.reg_loss = nn.MSELoss()
+        elif reg_type == "mae":
+            self.reg_loss = nn.L1Loss()
+        elif reg_type == "huber":
+            self.reg_loss = nn.HuberLoss()
+        else:
+            raise ValueError(f"Unknown regression type {reg_type}")
+
+    def forward(self, logits_ord, pred_reg, targets_long, targets_float):
+        """
+        logits_ord: (N, K-1)
+        pred_reg:   (N,)
+        targets_long: ordinal labels
+        targets_float: normalized severity (0-1 or 0-3)
+        """
+        loss_ord = self.coral(logits_ord, targets_long)
+        loss_reg = self.reg_loss(pred_reg, targets_float)
+        return loss_ord + self.lambda_reg * loss_reg
+
+
+
 # -----------------------------------------------------------
 # 5. LossFactory (central entry point for trainers)
 # -----------------------------------------------------------
@@ -136,7 +165,8 @@ class LossFactory:
         """
         loss_name ∈ {
             "ce", "weighted_ce", "focal",
-            "cb_focal", "coral"
+            "cb_focal", "coral",
+            "ordinal_regression"
         }
         """
         loss_name = loss_name.lower()
@@ -158,5 +188,10 @@ class LossFactory:
         if loss_name == "coral":
             # K classes → logits dim = K-1
             return CORALOrdinalLoss()
+        
+        if loss_name == "ordinal_regression":
+            lam = cb_beta  # repurpose cb_beta param as lambda_reg
+            return HybridOrdinalRegressionLoss(lambda_reg=lam)
+
 
         raise ValueError(f"Unknown loss type: {loss_name}")

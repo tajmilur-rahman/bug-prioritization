@@ -45,7 +45,7 @@ def compute_class_weights(
     labels, freqs = zip(*sorted(counts.items()))
     N, C = sum(freqs), len(freqs)
 
-    # Inverse frequency weighting   
+    # Inverse frequency weighting
     raw = np.array([N / (C * f) for f in freqs], dtype=float)
 
     # clipping
@@ -68,7 +68,6 @@ def compute_class_weights(
 def choose_imbalance_strategy(
     y_train: Sequence,
     algo: str,
-    ordinal_regression: bool = True
 ) -> Dict:
     """
     Returns a unified specification used by trainers:

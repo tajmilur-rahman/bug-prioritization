@@ -44,7 +44,8 @@ from libs.utils.metrics import brier_multiclass, ece
 
 # architecture
 from libs.models.mlp_arch import (
-    DropoutMLP,
+    build_mlp,
+    BlockDropout,
 )
 
 # ---------------- Ordinal helpers ----------------
@@ -164,9 +165,6 @@ def main():
 
     # ordinal vs softmax
     ap.add_argument("--ordinal", action="store_true", default=os.getenv("ORDINAL","true").lower()=="true")
-
-    # store best model for later diagnose (optional)
-    ap.add_argument("--store-model", type=bool, default=False)
     args = ap.parse_args()
 
     # ---------------------------------------------------------
@@ -236,12 +234,18 @@ def main():
     # ---------------------------------------------------------
     # Model
     # ---------------------------------------------------------
-    model = DropoutMLP(
-        in_dim=in_dim,
-        out_dim=out_dim,
-        cfg=cfg,
-        spans=spans,
-        ordinal=args.ordinal
+    model = nn.Sequential(
+        BlockDropout(spans),
+        build_mlp(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            hidden_list=cfg["hidden"],
+            act_name=cfg["act"],
+            dropout=cfg["dropout"],
+            norm=cfg["norm"],
+            droppath_rate=cfg["droppath"],
+            droppath_schedule=cfg["droppath_schedule"],
+        )
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -258,7 +262,7 @@ def main():
         print("\nWith ordinal head.")
         # Force ordinal loss — ignore imbalance strategies
         loss_fn = LossFactory.make(
-            loss_name="ordinal_regression",
+            loss_name="coral",
             num_classes=K
         )
     else:
@@ -396,13 +400,8 @@ def main():
             opt.zero_grad()
 
             with torch.cuda.amp.autocast(enabled=(cfg["amp"] and device.type=="cuda")):
-                if (args.ordinal):
-                    logits_ord, pred_reg = model(xb)
-                    targets_float = yb.float()  # or custom scaling
-                    loss = loss_fn(logits_ord, pred_reg, yb, targets_float)
-                else:
-                    logits, _ = model(xb)
-                    loss = loss_fn(logits, yb)
+                logits = model(xb)
+                loss = loss_fn(logits, yb)
 
             scaler.scale(loss).backward()
 
@@ -426,8 +425,7 @@ def main():
         logits_val = []
         with torch.no_grad():
             for xb, _ in batches(X_val, y_val, cfg["batch_size"]):
-                logits, _ = model(xb.to(device))
-                logits_val.append(logits.cpu())
+                logits_val.append(model(xb.to(device)).cpu())
         logits_val = torch.cat(logits_val, dim=0)
 
         if args.ordinal:
@@ -449,19 +447,13 @@ def main():
         else:
             patience -= 1
             if patience <= 0:
-                print(f"[MLP] Early stopping at epoch {epoch} (best macro-F1={best_f1:.4f})")
+                print(f"[MLP] Early stopping at epoch {epoch}")
                 break
 
     # restore best
     if best_state:
         model.load_state_dict(best_state)
         model.to(device)
-
-    # store best model for later diagnose (optional)
-    if args.store_model:
-        model_path = run_dir / "best_model.pt"
-        torch.save(model, model_path)
-        print(f"[MLP] Stored best model to {model_path}")
 
     # ===============================================================
     # PART 5.5 — Feature Importance (optional)
@@ -473,10 +465,7 @@ def main():
             X=X_val.numpy(),
             y=y_val.numpy(),
             schema=schema,
-            metric_fn=lambda probs, y: f1_score(
-                y.cpu().numpy(), probs.cpu().numpy().argmax(1),
-                average="macro"
-            ),
+            metric_fn=lambda logits, y_true: f1_score(y_true, logits.argmax(1), average="macro"),
             device=device,
             save_dir=run_dir / "importance"
         )
@@ -489,8 +478,7 @@ def main():
     logits_val = []
     with torch.no_grad():
         for xb, _ in batches(X_val, y_val, cfg["batch_size"]):
-            logits, _ = model(xb.to(device))
-            logits_val.append(logits.cpu())
+            logits_val.append(model(xb.to(device)).cpu())
     logits_val = torch.cat(logits_val, dim=0)
 
     if args.ordinal:

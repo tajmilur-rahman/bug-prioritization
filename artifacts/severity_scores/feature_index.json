@@ -1,0 +1,20 @@
+{
+  "MC_stability_crashes": 0,
+  "MC_performance_and_resource_issues": 1,
+  "MC_security_and_data_exposure": 2,
+  "MC_functional_correctness_errors": 3,
+  "MC_build_and_integration_failures": 4,
+  "MC_state_and_session_failures": 5,
+  "MC_regression_from_previous_behavior": 6,
+  "MC_user_experience_degradation": 7,
+  "MC_user_interaction_blockage": 8,
+  "MC_visual_and_accessibility_issues": 9,
+  "MC_user_context_specific_impact": 10,
+  "CTX_reproducibility": 11,
+  "CTX_specificity_of_conditions": 12,
+  "CTX_platformspecific_issues": 13,
+  "CTX_crossplatform_compatibility_issues": 14,
+  "CTX_intermittent_test_failures": 15,
+  "CTX_environmental_factors": 16,
+  "CTX_complexity_of_use_cases": 17
+}
